@@ -1,0 +1,6 @@
+{
+  "name": "한자 학습 보조 관리 시스템",
+  "description": "급수별 한자 수업 계획, 타이머, 실시간 문제 출제 카드 및 관리자 문제은행 시스템",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
