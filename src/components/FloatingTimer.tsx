@@ -11,9 +11,7 @@ import {
   Bell,
   Minimize2,
   Maximize2,
-  Flame,
-  Laugh,
-  Sparkles,
+  X,
 } from 'lucide-react';
 import { AlarmSoundType, playAlarm, playBeep, playMasterAlarm } from '../utils/audio';
 
@@ -55,8 +53,8 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
     } catch {}
   }, [alarmSound]);
 
-  // Widget UI State: 'mini' (ultra-compact capsule) | 'normal' (standard box)
-  const [sizeMode, setSizeMode] = useState<'mini' | 'normal'>('normal');
+  // Widget UI State: DEFAULT TO 'mini' (항상 기본적으로 작게 되어 있고, 누르면 펼쳐짐)
+  const [sizeMode, setSizeMode] = useState<'mini' | 'normal'>('mini');
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [isDirectInputOpen, setIsDirectInputOpen] = useState<boolean>(false);
   const [inputMin, setInputMin] = useState<number>(0);
@@ -65,7 +63,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
   // Position & Dragging (fixed coordinate)
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     if (typeof window !== 'undefined') {
-      return { x: Math.max(16, window.innerWidth - 270), y: 76 };
+      return { x: Math.max(16, window.innerWidth - 240), y: 76 };
     }
     return { x: 100, y: 76 };
   });
@@ -132,7 +130,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
       const dx = e.clientX - dragStartRef.current.startX;
       const dy = e.clientY - dragStartRef.current.startY;
 
-      const newX = Math.max(10, Math.min(window.innerWidth - 200, dragStartRef.current.initPosX + dx));
+      const newX = Math.max(10, Math.min(window.innerWidth - 180, dragStartRef.current.initPosX + dx));
       const newY = Math.max(10, Math.min(window.innerHeight - 60, dragStartRef.current.initPosY + dy));
 
       setPosition({ x: newX, y: newY });
@@ -143,7 +141,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
       const dx = e.touches[0].clientX - dragStartRef.current.startX;
       const dy = e.touches[0].clientY - dragStartRef.current.startY;
 
-      const newX = Math.max(10, Math.min(window.innerWidth - 200, dragStartRef.current.initPosX + dx));
+      const newX = Math.max(10, Math.min(window.innerWidth - 180, dragStartRef.current.initPosX + dx));
       const newY = Math.max(10, Math.min(window.innerHeight - 60, dragStartRef.current.initPosY + dy));
 
       setPosition({ x: newX, y: newY });
@@ -232,49 +230,58 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
         top: `${position.y}px`,
         zIndex: 9999,
       }}
-      className={`select-none transition-shadow ${
+      className={`select-none transition-all ${
         isAlarmActive
-          ? 'animate-bounce ring-4 ring-rose-500 shadow-2xl rounded-2xl'
-          : 'shadow-xl rounded-2xl'
+          ? 'animate-bounce ring-4 ring-rose-500 shadow-2xl rounded-full'
+          : 'shadow-xl'
       }`}
     >
-      {/* 1. ULTRA-COMPACT MINI CAPSULE MODE (초소형 한 줄 모드) */}
+      {/* 1. ULTRA-COMPACT MINI MODE (기본 모드: 작게 표시, 누르면 전체 타이머로 확장) */}
       {sizeMode === 'mini' ? (
-        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700 text-white rounded-full shadow-2xl px-2.5 py-1.5 flex items-center gap-2">
-          {/* Drag Handle */}
+        <div
+          onClick={() => {
+            if (!isDragging) {
+              setSizeMode('normal');
+            }
+          }}
+          className="bg-slate-900/95 hover:bg-slate-900 backdrop-blur-md border border-slate-700 hover:border-blue-400 text-white rounded-full shadow-2xl px-3 py-1.5 flex items-center gap-2 cursor-pointer transition ring-2 ring-blue-500/20 hover:ring-blue-500/50 active:scale-98 group"
+          title="클릭하면 큰 타이머 설정창이 나타납니다"
+        >
+          {/* Drag Grip Handle */}
           <div
-            onMouseDown={handleMouseDown}
-            onTouchStart={handleTouchStart}
-            className="flex items-center gap-1 cursor-move text-slate-400 hover:text-white px-1 py-0.5"
-            title="잡고 이동"
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              handleMouseDown(e);
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              handleTouchStart(e);
+            }}
+            className="flex items-center gap-1 cursor-move text-slate-400 group-hover:text-slate-200 py-0.5"
+            title="마우스로 잡고 이동"
           >
             <GripHorizontal className="w-3.5 h-3.5" />
             <Clock className="w-3.5 h-3.5 text-blue-400" />
           </div>
 
-          {/* Time Display */}
-          <span
-            onClick={() => setSizeMode('normal')}
-            className="font-mono text-base font-black text-emerald-400 tracking-wider cursor-pointer hover:text-emerald-300"
-            title="클릭하여 확대"
-          >
+          {/* Digital Time Counter */}
+          <span className="font-mono text-sm sm:text-base font-black text-emerald-400 tracking-wider">
             {formatTime(remaining)}
           </span>
 
-          {/* Current Sound Badge */}
-          <span
-            onClick={() => setSizeMode('normal')}
-            className="text-xs cursor-pointer"
-            title={`현재 알람: ${currentOption.label}`}
-          >
+          {/* Alarm Icon */}
+          <span className="text-xs" title={`알람 소리: ${currentOption.label}`}>
             {currentOption.icon}
           </span>
 
-          {/* Play/Pause */}
+          {/* Quick Play/Pause Button */}
           <button
             type="button"
-            onClick={toggleRun}
-            className={`p-1 rounded-full text-white font-bold transition cursor-pointer active:scale-95 ${
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleRun(e);
+            }}
+            className={`p-1 rounded-full text-white font-bold transition cursor-pointer active:scale-90 ${
               isRunning ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'
             }`}
             title={isRunning ? '일시정지' : '시작'}
@@ -282,40 +289,39 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
             {isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
           </button>
 
-          {/* Reset to 0 */}
+          {/* Quick Reset Button */}
           <button
             type="button"
-            onClick={handleResetToZero}
-            className="p-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleResetToZero(e);
+            }}
+            className="p-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer active:scale-90"
             title="0초로 리셋"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <RotateCcw className="w-3 h-3" />
           </button>
 
-          {/* Expand to Normal View */}
-          <button
-            type="button"
-            onClick={() => setSizeMode('normal')}
-            className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-            title="크기 키우기 (설정창 열기)"
-          >
-            <Maximize2 className="w-3 h-3 text-blue-400" />
-          </button>
+          {/* Expand Prompt Badge */}
+          <span className="text-[11px] font-bold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800/60 flex items-center gap-0.5 group-hover:bg-blue-900 transition">
+            <Maximize2 className="w-2.5 h-2.5" />
+            <span>설정</span>
+          </span>
         </div>
       ) : (
-        /* 2. STANDARD ADJUSTABLE CARD (보통 모드) */
-        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700 text-white rounded-2xl shadow-2xl overflow-hidden w-64 sm:w-70">
-          {/* Draggable Header */}
+        /* 2. FULL EXPANDED TIMER (누르면 나타나는 전체 타이머 창) */
+        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700 text-white rounded-2xl shadow-2xl overflow-hidden w-64 sm:w-70 animate-in fade-in zoom-in-95 duration-150">
+          {/* Draggable Header with Close/Minimize to Mini button */}
           <div
             onMouseDown={handleMouseDown}
             onTouchStart={handleTouchStart}
-            className="px-3 py-1.5 bg-slate-800/90 border-b border-slate-700/80 flex items-center justify-between cursor-move hover:bg-slate-800 transition"
+            className="px-3 py-2 bg-slate-800/90 border-b border-slate-700/80 flex items-center justify-between cursor-move hover:bg-slate-800 transition"
             title="마우스로 잡고 원하는 위치로 이동하세요"
           >
-            <div className="flex items-center gap-1 text-xs font-bold text-slate-300">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
               <GripHorizontal className="w-3.5 h-3.5 text-slate-400" />
               <Clock className="w-3.5 h-3.5 text-blue-400" />
-              <span className="text-[11px]">이동식 시계</span>
+              <span className="text-xs">수업 타이머</span>
             </div>
 
             <div className="flex items-center gap-1">
@@ -326,35 +332,36 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
                 </span>
               )}
 
-              {/* Minimize to Mini Pill */}
+              {/* Minimize to Mini Pill button */}
               <button
                 type="button"
                 onClick={() => setSizeMode('mini')}
-                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 transition cursor-pointer"
-                title="초소형 모드로 줄이기"
+                className="px-2 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="기본 작은 모양으로 접기"
               >
-                <Minimize2 className="w-3 h-3" />
+                <Minimize2 className="w-3 h-3 text-blue-400" />
+                <span>작게 접기</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsExpanded(!isExpanded)}
                 className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 transition cursor-pointer"
-                title={isExpanded ? '간단히 접기' : '더 많은 설정 펼치기'}
+                title={isExpanded ? '간단히 접기' : '더 많은 빠른시간 펼치기'}
               >
                 {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>
 
-          {/* Main Display & Core Buttons */}
-          <div className="p-3 space-y-2">
+          {/* Main Display & Core Controls */}
+          <div className="p-3 space-y-2.5">
             <div className="flex items-center justify-between gap-1.5">
               {/* Big Digital Display */}
               <div
                 onClick={() => setIsDirectInputOpen(!isDirectInputOpen)}
-                className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-xl font-mono text-2xl font-black text-emerald-400 tracking-wider flex-1 text-center cursor-pointer hover:border-blue-400 transition"
-                title="클릭하여 직접 시간 설정"
+                className="px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl font-mono text-2xl font-black text-emerald-400 tracking-wider flex-1 text-center cursor-pointer hover:border-blue-400 transition shadow-inner"
+                title="클릭하여 직접 분/초 설정"
               >
                 {formatTime(remaining)}
               </div>
@@ -363,10 +370,10 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
               <button
                 type="button"
                 onClick={toggleRun}
-                className={`p-2 rounded-xl font-bold flex items-center justify-center transition cursor-pointer active:scale-95 shrink-0 ${
+                className={`p-2.5 rounded-xl font-bold flex items-center justify-center transition cursor-pointer active:scale-95 shrink-0 shadow-xs ${
                   isRunning
-                    ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-xs'
-                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-xs'
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                    : 'bg-blue-600 hover:bg-blue-500 text-white'
                 }`}
                 title={isRunning ? '일시정지' : '타이머 시작'}
               >
@@ -377,7 +384,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
               <button
                 type="button"
                 onClick={handleResetToZero}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-white transition cursor-pointer active:scale-95 shrink-0 flex items-center gap-0.5"
+                className="p-2.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-white transition cursor-pointer active:scale-95 shrink-0 flex items-center gap-0.5"
                 title="0초로 리셋"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -390,28 +397,28 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
               <button
                 type="button"
                 onClick={() => adjustSec(-5)}
-                className="py-1 rounded-lg bg-slate-800/80 hover:bg-rose-900/80 text-slate-300 font-bold transition text-center cursor-pointer"
+                className="py-1.5 rounded-lg bg-slate-800/90 hover:bg-rose-900/80 text-slate-300 font-bold transition text-center cursor-pointer active:scale-95"
               >
                 -5초
               </button>
               <button
                 type="button"
                 onClick={() => adjustSec(+5)}
-                className="py-1 rounded-lg bg-slate-800/80 hover:bg-emerald-900/80 text-slate-300 font-bold transition text-center cursor-pointer"
+                className="py-1.5 rounded-lg bg-slate-800/90 hover:bg-emerald-900/80 text-slate-300 font-bold transition text-center cursor-pointer active:scale-95"
               >
                 +5초
               </button>
               <button
                 type="button"
                 onClick={() => adjustSec(+10)}
-                className="py-1 rounded-lg bg-slate-800/80 hover:bg-blue-900/80 text-slate-300 font-bold transition text-center cursor-pointer"
+                className="py-1.5 rounded-lg bg-slate-800/90 hover:bg-blue-900/80 text-slate-300 font-bold transition text-center cursor-pointer active:scale-95"
               >
                 +10초
               </button>
               <button
                 type="button"
                 onClick={() => adjustSec(+30)}
-                className="py-1 rounded-lg bg-slate-800/80 hover:bg-blue-900/80 text-slate-300 font-bold transition text-center cursor-pointer"
+                className="py-1.5 rounded-lg bg-slate-800/90 hover:bg-blue-900/80 text-slate-300 font-bold transition text-center cursor-pointer active:scale-95"
               >
                 +30초
               </button>
@@ -421,14 +428,14 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
             <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
                 <span className="flex items-center gap-1">
-                  <span>종료 알람 소리:</span>
+                  <span>종료 알람:</span>
                   <span className="text-amber-400 font-black">{currentOption.label}</span>
                 </span>
                 <button
                   type="button"
                   onClick={() => playMasterAlarm(alarmSound, true)}
-                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5 cursor-pointer bg-slate-800 px-1.5 py-0.5 rounded"
-                  title="현재 선택된 알람 소리 테스트"
+                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5 cursor-pointer bg-slate-800 px-1.5 py-0.5 rounded transition"
+                  title="현재 선택된 알람 소리 미리듣기"
                 >
                   <Volume2 className="w-2.5 h-2.5" />
                   <span>시험</span>
@@ -445,7 +452,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
                       setAlarmSound(opt.id);
                       playMasterAlarm(opt.id, soundEnabled);
                     }}
-                    className={`py-1.5 px-2 rounded-lg font-bold transition flex items-center justify-between cursor-pointer ${
+                    className={`py-1.5 px-2 rounded-lg font-bold transition flex items-center justify-between cursor-pointer active:scale-95 ${
                       alarmSound === opt.id
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'bg-slate-800/90 text-slate-300 hover:bg-slate-700'
@@ -526,27 +533,28 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
                     </button>
                   ))}
                 </div>
-
-                <div className="flex items-center justify-between pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setSizeMode('mini')}
-                    className="text-[10px] text-slate-400 hover:text-white flex items-center gap-0.5 cursor-pointer underline"
-                  >
-                    <Minimize2 className="w-2.5 h-2.5" />
-                    <span>초소형으로 축소</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsDirectInputOpen(!isDirectInputOpen)}
-                    className="text-[10px] text-blue-400 hover:text-blue-300 underline cursor-pointer"
-                  >
-                    {isDirectInputOpen ? '직접입력 닫기' : '원하는 시간 직접입력'}
-                  </button>
-                </div>
               </div>
             )}
+
+            {/* Bottom Minimize to Small Action Bar */}
+            <div className="pt-1 border-t border-slate-800 flex items-center justify-between text-[11px]">
+              <button
+                type="button"
+                onClick={() => setSizeMode('mini')}
+                className="text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer font-bold"
+              >
+                <Minimize2 className="w-3 h-3 text-blue-400" />
+                <span>항상 작게 표시하기 (접기)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsDirectInputOpen(!isDirectInputOpen)}
+                className="text-blue-400 hover:text-blue-300 underline cursor-pointer"
+              >
+                {isDirectInputOpen ? '직접입력 닫기' : '원하는 시간 직접입력'}
+              </button>
+            </div>
           </div>
         </div>
       )}

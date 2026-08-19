@@ -1,27 +1,189 @@
-import { AppState } from '../types';
+import { AppState, SectionItem } from '../types';
+
+const DEFAULT_LEVELS = [
+  '8급',
+  '7급',
+  '준6급',
+  '6급',
+  '준5급',
+  '5급',
+  '준4급',
+  '4급',
+  '준3급',
+  '3급',
+  '2급',
+];
+
+const DEFAULT_SECTION_A_ITEMS = [
+  { id: 'a_8', levelLabel: '8급', rangeName: '1과 기초 자연 (10p)' },
+  { id: 'a_7', levelLabel: '7급', rangeName: '4과 가족과 신체 (45p)' },
+  { id: 'a_j6', levelLabel: '준6급', rangeName: '5과 기초 한자 (80p)' },
+  { id: 'a_6', levelLabel: '6급', rangeName: '6과 국가와 배움 (90p)' },
+  { id: 'a_j5', levelLabel: '준5급', rangeName: '8과 생활과 예절 (140p)' },
+  { id: 'a_5', levelLabel: '5급', rangeName: '9과 과학과 기술 (200p)' },
+  { id: 'a_j4', levelLabel: '준4급', rangeName: '10과 역사와 철학 (265p)' },
+  { id: 'a_4', levelLabel: '4급', rangeName: '12과 사회와 제도 (320p)' },
+  { id: 'a_j3', levelLabel: '준3급', rangeName: '13과 학문과 탐구 (350p)' },
+  { id: 'a_3', levelLabel: '3급', rangeName: '14과 고전과 문헌 (380p)' },
+  { id: 'a_2', levelLabel: '2급', rangeName: '15과 심화 어휘 (410p)' },
+];
+
+const DEFAULT_SECTION_B_ITEMS = [
+  { id: 'b_8', levelLabel: '8급', rangeName: '2과 숫자와 방향 (20p)' },
+  { id: 'b_7', levelLabel: '7급', rangeName: '5과 방향과 계절 (60p)' },
+  { id: 'b_j6', levelLabel: '준6급', rangeName: '5과 기초 한자 (80p)' },
+  { id: 'b_6', levelLabel: '6급', rangeName: '7과 지리와 자연 (105p)' },
+  { id: 'b_j5', levelLabel: '준5급', rangeName: '9과 동식물과 생태 (160p)' },
+  { id: 'b_5', levelLabel: '5급', rangeName: '10과 경제와 상업 (220p)' },
+  { id: 'b_j4', levelLabel: '준4급', rangeName: '11과 문학과 예술 (290p)' },
+  { id: 'b_4', levelLabel: '4급', rangeName: '12과 사회와 제도 (320p)' },
+  { id: 'b_j3', levelLabel: '준3급', rangeName: '13과 학문과 탐구 (350p)' },
+  { id: 'b_3', levelLabel: '3급', rangeName: '14과 고전과 문헌 (380p)' },
+  { id: 'b_2', levelLabel: '2급', rangeName: '15과 심화 어휘 (410p)' },
+];
+
+const DEFAULT_SECTION_C_ITEMS = [
+  { id: 'c_8', levelLabel: '8급', rangeName: '3과 인물과 학교 (30p)' },
+  { id: 'c_7', levelLabel: '7급', rangeName: '6과 시간과 수 (75p)' },
+  { id: 'c_j6', levelLabel: '준6급', rangeName: '5과 기초 한자 (80p)' },
+  { id: 'c_6', levelLabel: '6급', rangeName: '6과 국가와 배움 (90p)' },
+  { id: 'c_j5', levelLabel: '준5급', rangeName: '8과 생활과 예절 (140p)' },
+  { id: 'c_5', levelLabel: '5급', rangeName: '9과 과학과 기술 (200p)' },
+  { id: 'c_j4', levelLabel: '준4급', rangeName: '10과 역사와 철학 (265p)' },
+  { id: 'c_4', levelLabel: '4급', rangeName: '12과 사회와 제도 (320p)' },
+  { id: 'c_j3', levelLabel: '준3급', rangeName: '13과 학문과 탐구 (350p)' },
+  { id: 'c_3', levelLabel: '3급', rangeName: '14과 고전과 문헌 (380p)' },
+  { id: 'c_2', levelLabel: '2급', rangeName: '15과 심화 어휘 (410p)' },
+];
 
 export const INITIAL_STATE: AppState = {
   fontSize: 18,
   soundEnabled: true,
   adminPassword: '1234',
-  levels: [
-    '8급',
-    '7급',
-    '준6급',
-    '6급',
-    '준5급',
-    '5급',
-    '준4급',
-    '4급',
-    '준3급',
-    '3급',
-    '2급',
-  ],
+  levels: DEFAULT_LEVELS,
   hiddenLevels: [],
+  sections: [
+    {
+      id: 'A',
+      name: '섹션 A',
+      role: 'prev',
+      items: DEFAULT_SECTION_A_ITEMS,
+    },
+    {
+      id: 'B',
+      name: '섹션 B',
+      role: 'today',
+      items: DEFAULT_SECTION_B_ITEMS,
+    },
+    {
+      id: 'C',
+      name: '섹션 C',
+      role: 'next',
+      items: DEFAULT_SECTION_C_ITEMS,
+    },
+  ],
   sectionRoles: {
     A: 'prev',
     B: 'today',
     C: 'next',
+  },
+  sectionPlans: {
+    A: {
+      '8급': '1과 기초 자연 (10p)',
+      '7급': '4과 가족과 신체 (45p)',
+      '준6급': '5과 기초 한자 (80p)',
+      '6급': '6과 국가와 배움 (90p)',
+      '준5급': '8과 생활과 예절 (140p)',
+      '5급': '9과 과학과 기술 (200p)',
+      '준4급': '10과 역사와 철학 (265p)',
+      '4급': '12과 사회와 제도 (320p)',
+      '준3급': '13과 학문과 탐구 (350p)',
+      '3급': '14과 고전과 문헌 (380p)',
+      '2급': '15과 심화 어휘 (410p)',
+    },
+    B: {
+      '8급': '2과 숫자와 방향 (20p)',
+      '7급': '5과 방향과 계절 (60p)',
+      '준6급': '5과 기초 한자 (80p)',
+      '6급': '7과 지리와 자연 (105p)',
+      '준5급': '9과 동식물과 생태 (160p)',
+      '5급': '10과 경제와 상업 (220p)',
+      '준4급': '11과 문학과 예술 (290p)',
+      '4급': '12과 사회와 제도 (320p)',
+      '준3급': '13과 학문과 탐구 (350p)',
+      '3급': '14과 고전과 문헌 (380p)',
+      '2급': '15과 심화 어휘 (410p)',
+    },
+    C: {
+      '8급': '3과 인물과 학교 (30p)',
+      '7급': '6과 시간과 수 (75p)',
+      '준6급': '5과 기초 한자 (80p)',
+      '6급': '6과 국가와 배움 (90p)',
+      '준5급': '8과 생활과 예절 (140p)',
+      '5급': '9과 과학과 기술 (200p)',
+      '준4급': '10과 역사와 철학 (265p)',
+      '4급': '12과 사회와 제도 (320p)',
+      '준3급': '13과 학문과 탐구 (350p)',
+      '3급': '14과 고전과 문헌 (380p)',
+      '2급': '15과 심화 어휘 (410p)',
+    },
+  },
+  lessonData: {
+    '8급': {
+      planA: '1과 기초 자연 (10p)',
+      planB: '2과 숫자와 방향 (20p)',
+      planC: '3과 인물과 학교 (30p)',
+    },
+    '7급': {
+      planA: '4과 가족과 신체 (45p)',
+      planB: '5과 방향과 계절 (60p)',
+      planC: '6과 시간과 수 (75p)',
+    },
+    '준6급': {
+      planA: '5과 기초 한자 (80p)',
+      planB: '5과 기초 한자 (80p)',
+      planC: '5과 기초 한자 (80p)',
+    },
+    '6급': {
+      planA: '6과 국가와 배움 (90p)',
+      planB: '7과 지리와 자연 (105p)',
+      planC: '6과 국가와 배움 (90p)',
+    },
+    '준5급': {
+      planA: '8과 생활과 예절 (140p)',
+      planB: '9과 동식물과 생태 (160p)',
+      planC: '8과 생활과 예절 (140p)',
+    },
+    '5급': {
+      planA: '9과 과학과 기술 (200p)',
+      planB: '10과 경제와 상업 (220p)',
+      planC: '9과 과학과 기술 (200p)',
+    },
+    '준4급': {
+      planA: '10과 역사와 철학 (265p)',
+      planB: '11과 문학과 예술 (290p)',
+      planC: '10과 역사와 철학 (265p)',
+    },
+    '4급': {
+      planA: '12과 사회와 제도 (320p)',
+      planB: '12과 사회와 제도 (320p)',
+      planC: '12과 사회와 제도 (320p)',
+    },
+    '준3급': {
+      planA: '13과 학문과 탐구 (350p)',
+      planB: '13과 학문과 탐구 (350p)',
+      planC: '13과 학문과 탐구 (350p)',
+    },
+    '3급': {
+      planA: '14과 고전과 문헌 (380p)',
+      planB: '14과 고전과 문헌 (380p)',
+      planC: '14과 고전과 문헌 (380p)',
+    },
+    '2급': {
+      planA: '15과 심화 어휘 (410p)',
+      planB: '15과 심화 어휘 (410p)',
+      planC: '15과 심화 어휘 (410p)',
+    },
   },
   quizPool: {
     '8급': [
@@ -235,63 +397,6 @@ export const INITIAL_STATE: AppState = {
         prob3: '정밀할 정, 미세할 미, 웅장할 웅',
         prob4: '높을 준, 엄숙할 엄, 빛날 휘',
       },
-    },
-  },
-  lessonData: {
-    '8급': {
-      planA: '1과 기초 자연 (10p)',
-      planB: '2과 숫자와 방향 (20p)',
-      planC: '3과 인물과 학교 (30p)',
-    },
-    '7급': {
-      planA: '4과 가족과 신체 (45p)',
-      planB: '5과 방향과 계절 (60p)',
-      planC: '6과 시간과 수 (75p)',
-    },
-    '준6급': {
-      planA: '5과 기초 한자 (80p)',
-      planB: '5과 기초 한자 (80p)',
-      planC: '5과 기초 한자 (80p)',
-    },
-    '6급': {
-      planA: '6과 국가와 배움 (90p)',
-      planB: '7과 지리와 자연 (105p)',
-      planC: '6과 국가와 배움 (90p)',
-    },
-    '준5급': {
-      planA: '8과 생활과 예절 (140p)',
-      planB: '9과 동식물과 생태 (160p)',
-      planC: '8과 생활과 예절 (140p)',
-    },
-    '5급': {
-      planA: '9과 과학과 기술 (200p)',
-      planB: '10과 경제와 상업 (220p)',
-      planC: '9과 과학과 기술 (200p)',
-    },
-    '준4급': {
-      planA: '10과 역사와 철학 (265p)',
-      planB: '11과 문학과 예술 (290p)',
-      planC: '10과 역사와 철학 (265p)',
-    },
-    '4급': {
-      planA: '12과 사회와 제도 (320p)',
-      planB: '12과 사회와 제도 (320p)',
-      planC: '12과 사회와 제도 (320p)',
-    },
-    '준3급': {
-      planA: '13과 학문과 탐구 (350p)',
-      planB: '13과 학문과 탐구 (350p)',
-      planC: '13과 학문과 탐구 (350p)',
-    },
-    '3급': {
-      planA: '14과 고전과 문헌 (380p)',
-      planB: '14과 고전과 문헌 (380p)',
-      planC: '14과 고전과 문헌 (380p)',
-    },
-    '2급': {
-      planA: '15과 심화 어휘 (410p)',
-      planB: '15과 심화 어휘 (410p)',
-      planC: '15과 심화 어휘 (410p)',
     },
   },
 };

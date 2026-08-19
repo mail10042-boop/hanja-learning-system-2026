@@ -1,66 +1,102 @@
 import React, { useState, useEffect } from 'react';
-import { ActiveTab, AppState, LevelLessonPlan } from './types';
+import { ActiveTab, AppState, LevelLessonPlan, SectionItem, SectionRowItem } from './types';
 import { INITIAL_STATE } from './data/initialData';
 import { Navbar } from './components/Navbar';
 import { LessonScreen } from './components/LessonScreen';
 import { QuizScreen } from './components/QuizScreen';
 import { AdminScreen } from './components/AdminScreen';
 import { FloatingTimer } from './components/FloatingTimer';
+import { sortHanjaLevels, sortSectionRowItems } from './utils/levelOrder';
 
-const STORAGE_KEY = 'hanjaSystemData_v7';
+const STORAGE_KEY = 'hanjaSystemData_v9';
+const BACKUP_KEY = 'hanja_auto_backup_latest';
 
-function normalizeLessonData(rawLessonData: unknown): Record<string, LevelLessonPlan> {
+function normalizeLessonData(rawLessonData: unknown, baseLevels: string[]): Record<string, LevelLessonPlan> {
   const result: Record<string, LevelLessonPlan> = {};
-  const baseLevels = INITIAL_STATE.levels;
   const dataObj = typeof rawLessonData === 'object' && rawLessonData !== null ? (rawLessonData as Record<string, any>) : {};
   const allLevels = Array.from(new Set([...baseLevels, ...Object.keys(dataObj)]));
 
   for (const lvl of allLevels) {
     const rawLevel = dataObj[lvl];
-    const initialLevel = INITIAL_STATE.lessonData[lvl] || INITIAL_STATE.lessonData['8급'];
+    const initialLevel = INITIAL_STATE.lessonData[lvl] || INITIAL_STATE.lessonData['8급'] || { planA: '', planB: '', planC: '' };
 
-    const getPlanStr = (key: 'A' | 'B' | 'C', legacyKey: 'prev' | 'today' | 'next') => {
+    const getPlanStr = (key: 'A' | 'B' | 'C') => {
       const planVal = rawLevel?.[`plan${key}`];
       if (typeof planVal === 'string' && planVal) return planVal;
-
-      const legacyVal = rawLevel?.[legacyKey];
-      if (typeof legacyVal === 'string' && legacyVal) return legacyVal;
-      if (legacyVal && typeof legacyVal === 'object' && typeof legacyVal.rangeName === 'string') return legacyVal.rangeName;
-
       return initialLevel[`plan${key}`] || '';
     };
 
     result[lvl] = {
-      planA: getPlanStr('A', 'prev'),
-      planB: getPlanStr('B', 'today'),
-      planC: getPlanStr('C', 'next'),
+      planA: getPlanStr('A'),
+      planB: getPlanStr('B'),
+      planC: getPlanStr('C'),
     };
   }
   return result;
 }
 
+function ensureSectionItems(sections: any[], levels: string[], sectionPlans: any): SectionItem[] {
+  if (!sections || !Array.isArray(sections) || sections.length === 0) {
+    return INITIAL_STATE.sections;
+  }
+
+  return sections.map((sec, idx) => {
+    const secId = sec.id || `sec_${idx + 1}`;
+    const secName = sec.name || `섹션 ${String.fromCharCode(65 + idx)}`;
+    const role = sec.role || 'today';
+
+    if (sec.items && Array.isArray(sec.items) && sec.items.length > 0) {
+      return {
+        id: secId,
+        name: secName,
+        role,
+        items: sec.items,
+      };
+    }
+
+    // Convert from levels/sectionPlans
+    const chosenLevels = sec.selectedLevels?.length ? sec.selectedLevels : levels;
+    const generatedItems: SectionRowItem[] = chosenLevels.map((lvl: string, rIdx: number) => {
+      const range = sectionPlans?.[secId]?.[lvl] || `${lvl} 진도 범위`;
+      return {
+        id: `row_${secId}_${rIdx}_${Date.now()}`,
+        levelLabel: lvl,
+        rangeName: range,
+      };
+    });
+
+    return {
+      id: secId,
+      name: secName,
+      role,
+      items: generatedItems,
+    };
+  });
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('hanjaSystemData_v6') || localStorage.getItem('hanjaSystemData_v5');
+      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('hanjaSystemData_v8') || localStorage.getItem(BACKUP_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        const bank = parsed.bank && Object.keys(parsed.bank).length && parsed.bank['8급']?.['1과 기초 자연 (10p)']
-          ? parsed.bank
-          : INITIAL_STATE.bank;
+        const rawLevels = parsed.levels?.length ? parsed.levels : INITIAL_STATE.levels;
+        const sortedLevels = sortHanjaLevels(rawLevels);
 
-        const normalizedLessonData = normalizeLessonData(parsed.lessonData);
-        const sectionRoles = parsed.sectionRoles?.A ? parsed.sectionRoles : INITIAL_STATE.sectionRoles;
+        const bank = parsed.bank && Object.keys(parsed.bank).length ? parsed.bank : INITIAL_STATE.bank;
+        const normalizedLessonData = normalizeLessonData(parsed.lessonData, sortedLevels);
         const quizPool = parsed.quizPool && Object.keys(parsed.quizPool).length > 0 ? { ...INITIAL_STATE.quizPool, ...parsed.quizPool } : INITIAL_STATE.quizPool;
+
+        const sections = ensureSectionItems(parsed.sections, sortedLevels, parsed.sectionPlans || INITIAL_STATE.sectionPlans);
 
         return {
           ...INITIAL_STATE,
           ...parsed,
-          levels: parsed.levels?.length ? parsed.levels : INITIAL_STATE.levels,
+          levels: sortedLevels,
+          sections,
           bank,
           quizPool,
           lessonData: normalizedLessonData,
-          sectionRoles,
         };
       }
     } catch (err) {
@@ -72,13 +108,21 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('lesson');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [showFloatingTimer, setShowFloatingTimer] = useState<boolean>(true);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('실시간 자동 백업 완료');
 
-  // Sync state changes to localStorage
+  // Automatic Real-time Auto-Save & Auto-Backup
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      const serialized = JSON.stringify(state);
+      localStorage.setItem(STORAGE_KEY, serialized);
+      localStorage.setItem(BACKUP_KEY, serialized);
+      
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+      setAutoSaveStatus(`실시간 자동 백업 완료 (${timeStr})`);
     } catch (err) {
       console.warn('Failed to persist to localStorage', err);
+      setAutoSaveStatus('저장 오류');
     }
   }, [state]);
 
@@ -178,11 +222,16 @@ export default function App() {
         )}
       </main>
 
-      {/* Classroom Footer */}
-      <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500 print:hidden">
+      {/* Classroom Footer with Auto-Save Badge */}
+      <footer className="border-t border-slate-200 bg-white py-3.5 text-center text-xs text-slate-500 print:hidden">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>한자 학습 보조 관리 시스템 (초·중등 급수별 한자 교육 보조 도구)</span>
-          <span className="text-slate-400">데이터는 브라우저 로컬 저장소에 안전하게 유지됩니다.</span>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-700 font-semibold text-[11px]">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>{autoSaveStatus}</span>
+            </span>
+          </div>
         </div>
       </footer>
     </div>

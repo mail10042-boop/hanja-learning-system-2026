@@ -4,9 +4,16 @@ import {
   RefreshCw,
   RotateCcw,
   BookOpen,
+  Plus,
+  Trash2,
+  Edit2,
+  Check,
+  Layers,
 } from 'lucide-react';
-import { AppState, RangeProblemData, SectionRole } from '../types';
+import { AppState, SectionItem, SectionRowItem } from '../types';
+import { INITIAL_STATE } from '../data/initialData';
 import { playBeep } from '../utils/audio';
+import { extractBaseLevel } from '../utils/levelOrder';
 
 interface LessonScreenProps {
   state: AppState;
@@ -14,6 +21,24 @@ interface LessonScreenProps {
   onToggleLevelHide: (level: string) => void;
   onRestoreAllLevels: () => void;
 }
+
+const COMMON_PRESET_BUTTONS = [
+  '8급',
+  '7급',
+  '준6급',
+  '6급',
+  '준5급 0',
+  '준5급 1',
+  '준5급',
+  '5급',
+  '준4급 0',
+  '준4급 1',
+  '준4급',
+  '4급',
+  '준3급',
+  '3급',
+  '2급',
+];
 
 export const LessonScreen: React.FC<LessonScreenProps> = ({
   state,
@@ -24,40 +49,171 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   // Active problem tab: 1, 2, 3, 4
   const [selectedProbNum, setSelectedProbNum] = useState<1 | 2 | 3 | 4>(1);
 
-  // Problem source section: 'A' | 'B' | 'C'
-  const [problemSection, setProblemSection] = useState<'A' | 'B' | 'C'>('B');
+  // Active dynamic sections list with safe fallback
+  const activeSections: SectionItem[] = state.sections && state.sections.length > 0
+    ? state.sections
+    : INITIAL_STATE.sections;
 
-  // Sticker Cycle: prev -> today -> next -> custom -> prev
-  const cycleSectionRole = (section: 'A' | 'B' | 'C') => {
-    playBeep(state.soundEnabled, 600, 0.06);
-    const current = state.sectionRoles[section];
-    const order: SectionRole[] = ['prev', 'today', 'next', 'custom'];
-    const nextIdx = (order.indexOf(current) + 1) % order.length;
-    const nextRole = order[nextIdx];
+  // Problem source section: dynamic section ID
+  const [problemSectionId, setProblemSectionId] = useState<string>(
+    activeSections.find((s) => s.role === 'today')?.id || activeSections[0]?.id || 'A'
+  );
 
-    onUpdateState((prev) => ({
-      ...prev,
-      sectionRoles: {
-        ...prev.sectionRoles,
-        [section]: nextRole,
-      },
-    }));
+  // Section renaming state
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [editTitleInput, setEditTitleInput] = useState<string>('');
+
+  // Add Item to Section popover or toggle
+  const [openAddBoxSecId, setOpenAddBoxSecId] = useState<string | null>(null);
+  const [customAddInput, setCustomAddInput] = useState<string>('');
+
+  // Add new section (D, E, F...)
+  const handleAddSection = () => {
+    playBeep(state.soundEnabled, 800, 0.08);
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const nextLetter = alphabet[activeSections.length] || `${activeSections.length + 1}`;
+    const newId = `sec_${Date.now()}`;
+    const newName = `섹션 ${nextLetter}`;
+
+    const newSectionItem: SectionItem = {
+      id: newId,
+      name: newName,
+      role: 'custom',
+      items: [
+        { id: `row_${newId}_1`, levelLabel: '8급', rangeName: '1과 (10p)' },
+        { id: `row_${newId}_2`, levelLabel: '준5급 0', rangeName: '8과 (140p)' },
+      ],
+    };
+
+    onUpdateState((prev) => {
+      const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
+      return {
+        ...prev,
+        sections: [...currentSections, newSectionItem],
+      };
+    });
   };
 
-  // Rotate all 3 stickers: A -> B -> C -> A
+  // Delete section
+  const handleDeleteSection = (secId: string, secName: string) => {
+    if (activeSections.length <= 1) {
+      alert('최소 1개 이상의 섹션이 필요합니다.');
+      return;
+    }
+    if (!window.confirm(`[${secName}]을(를) 삭제하시겠습니까?`)) {
+      return;
+    }
+
+    onUpdateState((prev) => {
+      const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
+      return {
+        ...prev,
+        sections: currentSections.filter((s) => s.id !== secId),
+      };
+    });
+
+    if (problemSectionId === secId) {
+      const fallback = activeSections.find((s) => s.id !== secId)?.id || 'A';
+      setProblemSectionId(fallback);
+    }
+  };
+
+  // Cycle role for a specific section
+  const cycleSectionRole = (secId: string) => {
+    playBeep(state.soundEnabled, 600, 0.06);
+    const ROLES: { role: string; label: string }[] = [
+      { role: 'prev', label: '저번 시간에 배운 한자' },
+      { role: 'today', label: '오늘 배울 한자' },
+      { role: 'next', label: '다음 시간에 배울 한자' },
+      { role: 'review', label: '복습·심화 진도' },
+      { role: 'homework', label: '과제·자율 진도' },
+      { role: 'custom', label: '기타/자유 진도' },
+    ];
+
+    onUpdateState((prev) => {
+      const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
+      const nextSections = currentSections.map((s) => {
+        if (s.id === secId) {
+          const currentIdx = ROLES.findIndex((r) => r.role === s.role);
+          const nextIdx = (currentIdx + 1) % ROLES.length;
+          return { ...s, role: ROLES[nextIdx].role };
+        }
+        return s;
+      });
+
+      return { ...prev, sections: nextSections };
+    });
+  };
+
+  // Rotate roles sequentially across sections
   const handleRotateAllStickers = () => {
     playBeep(state.soundEnabled, 700, 0.08);
-    onUpdateState((prev) => ({
-      ...prev,
-      sectionRoles: {
-        A: prev.sectionRoles.C,
-        B: prev.sectionRoles.A,
-        C: prev.sectionRoles.B,
-      },
-    }));
+    onUpdateState((prev) => {
+      const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
+      if (currentSections.length <= 1) return prev;
+
+      const firstRole = currentSections[0].role;
+      const nextSections = currentSections.map((s, idx) => {
+        if (idx === currentSections.length - 1) {
+          return { ...s, role: firstRole };
+        }
+        return { ...s, role: currentSections[idx + 1].role };
+      });
+
+      return { ...prev, sections: nextSections };
+    });
   };
 
-  const getRoleBadge = (role: SectionRole) => {
+  // Save renamed section
+  const handleSaveRename = (secId: string) => {
+    const trimmed = editTitleInput.trim();
+    if (!trimmed) {
+      setEditingSectionId(null);
+      return;
+    }
+    onUpdateState((prev) => {
+      const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
+      const nextSections = currentSections.map((s) => (s.id === secId ? { ...s, name: trimmed } : s));
+      return { ...prev, sections: nextSections };
+    });
+    setEditingSectionId(null);
+  };
+
+  // Add Item to a Section (e.g. 준5급 0, 준5급 1, etc.)
+  const handleAddItemToSection = (secId: string, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+
+    playBeep(state.soundEnabled, 750, 0.06);
+    const newRow: SectionRowItem = {
+      id: `row_${secId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      levelLabel: trimmed,
+      rangeName: `${trimmed} 진도 범위`,
+    };
+
+    onUpdateState((prev) => {
+      const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
+      return {
+        ...prev,
+        sections: currentSections.map((s) => (s.id === secId ? { ...s, items: [...(s.items || []), newRow] } : s)),
+      };
+    });
+
+    setCustomAddInput('');
+  };
+
+  // Remove an Item from a section
+  const handleDeleteItemFromSection = (secId: string, rowId: string) => {
+    onUpdateState((prev) => {
+      const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
+      return {
+        ...prev,
+        sections: currentSections.map((s) => (s.id === secId ? { ...s, items: (s.items || []).filter((r) => r.id !== rowId) } : s)),
+      };
+    });
+  };
+
+  const getRoleBadge = (role: string) => {
     switch (role) {
       case 'prev':
         return {
@@ -77,6 +233,18 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
           color: 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-500 shadow-2xs',
           dot: 'bg-white',
         };
+      case 'review':
+        return {
+          label: '복습·심화 진도',
+          color: 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-500 shadow-2xs',
+          dot: 'bg-white',
+        };
+      case 'homework':
+        return {
+          label: '과제·자율 진도',
+          color: 'bg-purple-600 text-white border-purple-700 hover:bg-purple-500 shadow-2xs',
+          dot: 'bg-white',
+        };
       default:
         return {
           label: '기타/자유 진도',
@@ -86,20 +254,39 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
     }
   };
 
-  const visibleLevels = state.levels.filter((lvl) => !state.hiddenLevels.includes(lvl));
+  // Helper to extract problem text for a row item
+  const getProblemTextForRow = (row: SectionRowItem, probNum: 1 | 2 | 3 | 4): string => {
+    // 1. Check direct custom problem override
+    const customKey = `customProb${probNum}` as keyof SectionRowItem;
+    if (typeof row[customKey] === 'string' && (row[customKey] as string).trim()) {
+      return (row[customKey] as string).trim();
+    }
 
-  const getProblemText = (lvl: string, secKey: 'A' | 'B' | 'C', probNum: 1 | 2 | 3 | 4): string => {
-    const planKey = `plan${secKey}` as keyof typeof state.lessonData[string];
-    const rangeName = state.lessonData[lvl]?.[planKey] || '';
-    if (!rangeName) return '';
+    // 2. Base level lookup in problem bank
+    const baseLvl = row.baseLevel || extractBaseLevel(row.levelLabel);
+    const rangeData = state.bank[baseLvl]?.[row.rangeName];
+    if (rangeData) {
+      const probKey = `prob${probNum}` as keyof typeof rangeData;
+      const txt = rangeData[probKey];
+      if (typeof txt === 'string' && txt.trim()) return txt.trim();
+    }
 
-    const rangeData = state.bank[lvl]?.[rangeName];
-    if (!rangeData) return '';
+    // 3. Check exact label match in bank
+    const directRangeData = state.bank[row.levelLabel]?.[row.rangeName];
+    if (directRangeData) {
+      const probKey = `prob${probNum}` as keyof typeof directRangeData;
+      const txt = directRangeData[probKey];
+      if (typeof txt === 'string' && txt.trim()) return txt.trim();
+    }
 
-    const probKey = `prob${probNum}` as keyof RangeProblemData;
-    const txt = rangeData[probKey];
-    return typeof txt === 'string' ? txt : '';
+    return '';
   };
+
+  // Find target section for problem section
+  const currentProblemSection = activeSections.find((s) => s.id === problemSectionId) || activeSections[0];
+  const problemItems = (currentProblemSection?.items || []).filter(
+    (item) => !state.hiddenLevels.includes(item.levelLabel) && !state.hiddenLevels.includes(extractBaseLevel(item.levelLabel))
+  );
 
   return (
     <div id="screen-lesson" className="space-y-6">
@@ -135,55 +322,111 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
         </div>
       )}
 
-      {/* Global Sticker Rotation Bar */}
+      {/* Global Section Controls Bar: Add Section & Rotate Stickers */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-slate-800 text-sm">진도 스티커 안내:</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-black text-slate-800 text-sm">진도 섹션 ({activeSections.length}개):</span>
           <span className="text-slate-600">
-            각 섹션의 🏷️ 스티커를 클릭하여 <strong>[저번 시간 / 오늘 / 다음 시간]</strong>을 변경할 수 있습니다.
+            각 섹션별로 <strong>준5급 0, 준5급 1, 준6급</strong> 등 원하는 급수를 자유롭게 추가하고 진도를 설정할 수 있습니다.
           </span>
         </div>
 
-        <button
-          type="button"
-          onClick={handleRotateAllStickers}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold transition shadow-2xs cursor-pointer active:scale-98"
-        >
-          <RotateCcw className="w-3.5 h-3.5 text-blue-400" />
-          <span>🔄 다음 주로 진도 일괄 순환 (A→B→C)</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Quick Add Section Button */}
+          <button
+            type="button"
+            onClick={handleAddSection}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold transition shadow-2xs cursor-pointer active:scale-95"
+            title="새로운 진도 섹션 추가하기 (섹션 D, E...)"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ 새 섹션 추가</span>
+          </button>
+
+          {activeSections.length > 1 && (
+            <button
+              type="button"
+              onClick={handleRotateAllStickers}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold transition shadow-2xs cursor-pointer active:scale-98"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-blue-400" />
+              <span>🔄 진도 일괄 순환</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* FULL-WIDTH 3 LESSON SECTIONS (A, B, C) */}
+      {/* DYNAMIC FULL-WIDTH LESSON SECTIONS (A, B, C, D...) */}
       <div className="space-y-6">
-        {(['A', 'B', 'C'] as const).map((secKey) => {
-          const role = state.sectionRoles[secKey];
+        {activeSections.map((sec, index) => {
+          const role = sec.role;
           const badge = getRoleBadge(role);
-          const planKey = `plan${secKey}` as keyof typeof state.lessonData[string];
+          const isEditing = editingSectionId === sec.id;
+          const isAddBoxOpen = openAddBoxSecId === sec.id;
+          const rawItems = sec.items || [];
+          const visibleItems = rawItems.filter(
+            (r) => !state.hiddenLevels.includes(r.levelLabel) && !state.hiddenLevels.includes(extractBaseLevel(r.levelLabel))
+          );
 
           return (
             <section
-              key={secKey}
+              key={sec.id}
               className={`bg-white rounded-2xl p-5 sm:p-6 border shadow-xs transition ${
                 role === 'today' ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200'
               }`}
             >
               {/* Section Header */}
               <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 mb-4 gap-2">
-                <div className="flex items-center gap-2 sm:gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                   <span className="w-8 h-8 rounded-xl bg-slate-900 text-white font-black text-sm flex items-center justify-center shadow-2xs">
-                    {secKey}
+                    {index + 1}
                   </span>
-                  <h2 className="text-xl font-black text-slate-900 tracking-tight">
-                    섹션 {secKey}
-                  </h2>
+
+                  {/* Editable Section Name */}
+                  {isEditing ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={editTitleInput}
+                        onChange={(e) => setEditTitleInput(e.target.value)}
+                        className="px-2.5 py-1 text-base font-black rounded-lg border border-blue-400 focus:ring-2 focus:ring-blue-500 w-36"
+                        autoFocus
+                        onKeyDown={(e) => e.key === 'Enter' && handleSaveRename(sec.id)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveRename(sec.id)}
+                        className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer"
+                        title="이름 저장"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 group">
+                      <h2 className="text-xl font-black text-slate-900 tracking-tight">
+                        {sec.name}
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSectionId(sec.id);
+                          setEditTitleInput(sec.name);
+                        }}
+                        className="text-slate-400 hover:text-blue-600 p-1 rounded-md opacity-70 group-hover:opacity-100 transition cursor-pointer"
+                        title="섹션 이름 바꾸기"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Clickable Role Sticker */}
                   <button
                     type="button"
-                    onClick={() => cycleSectionRole(secKey)}
+                    onClick={() => cycleSectionRole(sec.id)}
                     className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs sm:text-sm font-bold transition cursor-pointer active:scale-95 ${badge.color}`}
-                    title="클릭하여 역할 변경 (저번시간/오늘/다음시간)"
+                    title="클릭하여 역할 변경 (저번시간/오늘/다음시간/복습 등)"
                   >
                     <span className={`w-2 h-2 rounded-full ${badge.dot}`}></span>
                     <span>🏷️ {badge.label}</span>
@@ -191,42 +434,124 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                   </button>
                 </div>
 
-                <span className="text-xs font-semibold text-slate-400">
-                  {visibleLevels.length}개 급수 전체 표시
-                </span>
+                <div className="flex items-center gap-2">
+                  {/* Quick Add Level Item Button for this section */}
+                  <button
+                    type="button"
+                    onClick={() => setOpenAddBoxSecId(isAddBoxOpen ? null : sec.id)}
+                    className={`text-xs px-3 py-1.5 rounded-xl border font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                      isAddBoxOpen
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ 급수 항목 추가 ({visibleItems.length}개)</span>
+                  </button>
+
+                  {/* Delete Section button if > 1 section exists */}
+                  {activeSections.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSection(sec.id, sec.name)}
+                      className="text-xs text-slate-400 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded-lg transition cursor-pointer flex items-center gap-1"
+                      title="이 섹션 삭제하기"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>삭제</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {/* 11+ Levels Responsive Grid: Full Text Visible, No Truncation */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {visibleLevels.map((lvl) => {
-                  const rangeName = state.lessonData[lvl]?.[planKey] || '(범위 미설정)';
-                  return (
-                    <div
-                      key={`${secKey}-${lvl}`}
-                      className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-white hover:border-slate-300 transition flex items-start justify-between gap-2 shadow-2xs min-h-[58px]"
+              {/* QUICK INLINE LEVEL ADDER (Expands when clicked) */}
+              {isAddBoxOpen && (
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-blue-200 mb-4 space-y-2 animate-in fade-in duration-150">
+                  <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span>💡 [{sec.name}]에 추가할 급수를 선택하거나 직접 입력하세요:</span>
+                  </div>
+
+                  {/* Preset quick pills */}
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {COMMON_PRESET_BUTTONS.map((btnLabel) => (
+                      <button
+                        key={btnLabel}
+                        type="button"
+                        onClick={() => handleAddItemToSection(sec.id, btnLabel)}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-400 text-slate-700 text-xs font-bold transition cursor-pointer"
+                      >
+                        +{btnLabel}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom input line */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+                    <input
+                      type="text"
+                      value={customAddInput}
+                      onChange={(e) => setCustomAddInput(e.target.value)}
+                      placeholder="자유 급수명 직접 입력 (예: 준5급 0, 준5급 1, 준6급 심화반)..."
+                      className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm font-semibold focus:ring-2 focus:ring-blue-500"
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddItemToSection(sec.id, customAddInput)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAddItemToSection(sec.id, customAddInput)}
+                      className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer"
                     >
-                      <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                        <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-slate-800 text-white font-black text-xs sm:text-sm min-w-[54px] shrink-0 mt-0.5 shadow-2xs">
-                          {lvl}
-                        </span>
-                        {/* Range Text is fully visible and large */}
-                        <div className="text-slate-900 font-bold text-sm sm:text-base leading-snug break-words flex-1 whitespace-normal">
-                          {rangeName}
+                      추가
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Levels Responsive Grid for this section: Full Text Visible, Big Bold Label */}
+              {visibleItems.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {visibleItems.map((item) => {
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-white hover:border-slate-300 transition flex items-start justify-between gap-2 shadow-2xs min-h-[58px]"
+                      >
+                        <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                          <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-slate-800 text-white font-black text-xs sm:text-sm min-w-[54px] shrink-0 mt-0.5 shadow-2xs">
+                            {item.levelLabel}
+                          </span>
+                          {/* Range Text is fully visible and large */}
+                          <div className="text-slate-900 font-bold text-sm sm:text-base leading-snug break-words flex-1 whitespace-normal">
+                            {item.rangeName || '(진도 범위 미설정)'}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => onToggleLevelHide(item.levelLabel)}
+                            className="text-[11px] p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-600 transition cursor-pointer"
+                            title={`${item.levelLabel} 화면에서 숨기기`}
+                          >
+                            <EyeOff className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteItemFromSection(sec.id, item.id)}
+                            className="text-[11px] p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                            title="이 항목 삭제"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => onToggleLevelHide(lvl)}
-                        className="text-[11px] p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-600 transition shrink-0 cursor-pointer"
-                        title={`${lvl} 숨기기`}
-                      >
-                        <EyeOff className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  등록된 급수 항목이 없습니다. 상단의 [+ 급수 항목 추가] 버튼을 눌러 원하는 급수를 넣어주세요.
+                </div>
+              )}
             </section>
           );
         })}
@@ -242,24 +567,27 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
             </h3>
           </div>
 
-          {/* Section Source Picker */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold text-slate-600">
+          {/* Dynamic Section Source Picker */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold text-slate-600 flex-wrap">
             <span className="px-2 text-slate-400">출제 대상:</span>
-            {(['A', 'B', 'C'] as const).map((sec) => {
-              const role = state.sectionRoles[sec];
-              const label = role === 'today' ? `섹션 ${sec} (오늘)` : role === 'prev' ? `섹션 ${sec} (저번)` : `섹션 ${sec}`;
+            {activeSections.map((sec) => {
+              const roleBadge = getRoleBadge(sec.role);
+              const isSelected = problemSectionId === sec.id;
               return (
                 <button
-                  key={sec}
+                  key={sec.id}
                   type="button"
-                  onClick={() => setProblemSection(sec)}
-                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer text-xs ${
-                    problemSection === sec
+                  onClick={() => setProblemSectionId(sec.id)}
+                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer text-xs flex items-center gap-1.5 ${
+                    isSelected
                       ? 'bg-blue-600 text-white shadow-2xs font-bold'
-                      : 'hover:text-slate-900'
+                      : 'hover:text-slate-900 hover:bg-slate-200/60'
                   }`}
                 >
-                  {label}
+                  <span>{sec.name}</span>
+                  <span className={`text-[10px] opacity-80 ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
+                    ({roleBadge.label.split(' ')[0]})
+                  </span>
                 </button>
               );
             })}
@@ -284,40 +612,47 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
           ))}
         </div>
 
-        {/* 11+ Levels Problem Cards with Large Bold Korean Text */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
-          {visibleLevels.map((lvl) => {
-            const probText = getProblemText(lvl, problemSection, selectedProbNum);
+        {/* Selected Items Problem Cards with Large Bold Korean Text */}
+        {problemItems.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+            {problemItems.map((item) => {
+              const probText = getProblemTextForRow(item, selectedProbNum);
+              const activeSecName = activeSections.find((s) => s.id === problemSectionId)?.name || '선택 섹션';
 
-            return (
-              <div
-                key={`prob-${selectedProbNum}-${lvl}`}
-                className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2 shadow-2xs"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-slate-800 text-white font-black text-xs sm:text-sm shadow-2xs">
-                    {lvl}
-                  </span>
-                  <span className="text-xs text-slate-400 font-semibold">
-                    섹션 {problemSection} • 문제 {selectedProbNum}번
-                  </span>
-                </div>
+              return (
+                <div
+                  key={`prob-${selectedProbNum}-${item.id}`}
+                  className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2 shadow-2xs"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-slate-800 text-white font-black text-xs sm:text-sm shadow-2xs">
+                      {item.levelLabel}
+                    </span>
+                    <span className="text-xs text-slate-400 font-semibold">
+                      {activeSecName} • 문제 {selectedProbNum}번
+                    </span>
+                  </div>
 
-                <div className="bg-white p-3 rounded-lg border border-slate-200 min-h-[50px] flex items-center">
-                  {probText ? (
-                    <p className="text-slate-900 font-black text-base sm:text-lg leading-relaxed break-words whitespace-normal">
-                      {probText}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-slate-400 italic">
-                      (등록된 문제 없음)
-                    </p>
-                  )}
+                  <div className="bg-white p-3 rounded-lg border border-slate-200 min-h-[50px] flex items-center">
+                    {probText ? (
+                      <p className="text-slate-900 font-black text-base sm:text-lg leading-relaxed break-words whitespace-normal">
+                        {probText}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">
+                        {item.rangeName ? `[${item.rangeName}] 문제 미등록` : '(등록된 문제 없음)'}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-6 text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+            출제 대상 섹션에 등록된 진도 항목이 없습니다.
+          </div>
+        )}
       </section>
     </div>
   );
