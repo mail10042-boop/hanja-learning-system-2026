@@ -8,7 +8,20 @@ import { AdminScreen } from './components/AdminScreen';
 import { FloatingTimer } from './components/FloatingTimer';
 import { sortHanjaLevels, sortSectionRowItems } from './utils/levelOrder';
 
-const STORAGE_KEY = 'hanjaSystemData_v11';
+const STORAGE_KEYS_TO_TRY = [
+  'hanjaSystemData_live',
+  'hanjaSystemData_main',
+  'hanjaSystemData_v11',
+  'hanjaSystemData_v10',
+  'hanjaSystemData_v9',
+  'hanjaSystemData_v8',
+  'hanjaSystemData_v7',
+  'hanja_auto_backup_latest',
+  'hanja_auto_backup_snapshot',
+  'hanja_user_backup',
+];
+
+const PRIMARY_STORAGE_KEY = 'hanjaSystemData_main';
 const BACKUP_KEY = 'hanja_auto_backup_latest';
 const BACKUP_SNAPSHOT_KEY = 'hanja_auto_backup_snapshot';
 
@@ -41,41 +54,29 @@ function ensureSectionItems(sections: any[], levels: string[], sectionPlans: any
     return INITIAL_STATE.sections;
   }
 
-  // Find master items template (usually from first section)
-  const masterSec = sections[0];
-  const masterItems: SectionRowItem[] = masterSec?.items && Array.isArray(masterSec.items) && masterSec.items.length > 0
-    ? masterSec.items
-    : INITIAL_STATE.sections[0].items;
-
   return sections.map((sec, idx) => {
     const secId = sec.id || `sec_${idx + 1}`;
     const secName = sec.name || `섹션 ${String.fromCharCode(65 + idx)}`;
     const role = sec.role || (idx === 0 ? 'prev' : idx === 1 ? 'today' : 'next');
 
-    // If section has items, align them to master structure while preserving individual rangeName
+    // If section has items, preserve every single item cleanly
     if (sec.items && Array.isArray(sec.items) && sec.items.length > 0) {
-      // Map master items to ensure row order and IDs match across all sections
-      const alignedItems: SectionRowItem[] = masterItems.map((mItem, rIdx) => {
-        const existingInSec = sec.items.find(
-          (it: any) => it.id === mItem.id || it.levelLabel === mItem.levelLabel
-        );
-        return {
-          id: mItem.id,
-          levelLabel: mItem.levelLabel,
-          baseLevel: mItem.baseLevel,
-          rangeName: existingInSec?.rangeName || sec.items[rIdx]?.rangeName || mItem.rangeName,
-          customProb1: existingInSec?.customProb1 ?? mItem.customProb1,
-          customProb2: existingInSec?.customProb2 ?? mItem.customProb2,
-          customProb3: existingInSec?.customProb3 ?? mItem.customProb3,
-          customProb4: existingInSec?.customProb4 ?? mItem.customProb4,
-        };
-      });
+      const sanitizedItems: SectionRowItem[] = sec.items.map((it: any, rIdx: number) => ({
+        id: it.id || `row_${secId}_${rIdx}_${Date.now()}`,
+        levelLabel: it.levelLabel || (levels[rIdx] || '8급'),
+        baseLevel: it.baseLevel || undefined,
+        rangeName: typeof it.rangeName === 'string' ? it.rangeName : '',
+        customProb1: it.customProb1,
+        customProb2: it.customProb2,
+        customProb3: it.customProb3,
+        customProb4: it.customProb4,
+      }));
 
       return {
         id: secId,
         name: secName,
         role,
-        items: alignedItems,
+        items: sanitizedItems,
       };
     }
 
@@ -99,65 +100,81 @@ function ensureSectionItems(sections: any[], levels: string[], sectionPlans: any
   });
 }
 
-export default function App() {
-  const [state, setState] = useState<AppState>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('hanjaSystemData_v9') || localStorage.getItem('hanjaSystemData_v8') || localStorage.getItem(BACKUP_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const rawLevels = parsed.levels?.length ? parsed.levels : INITIAL_STATE.levels;
-        const sortedLevels = sortHanjaLevels(rawLevels);
+function loadSavedState(): AppState {
+  try {
+    for (const key of STORAGE_KEYS_TO_TRY) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            const rawLevels = parsed.levels?.length ? parsed.levels : INITIAL_STATE.levels;
+            const sortedLevels = sortHanjaLevels(rawLevels);
 
-        const bank = parsed.bank && Object.keys(parsed.bank).length ? parsed.bank : INITIAL_STATE.bank;
-        const normalizedLessonData = normalizeLessonData(parsed.lessonData, sortedLevels);
-        const quizPool = parsed.quizPool && Object.keys(parsed.quizPool).length > 0 ? { ...INITIAL_STATE.quizPool, ...parsed.quizPool } : INITIAL_STATE.quizPool;
+            const bank = parsed.bank && Object.keys(parsed.bank).length ? parsed.bank : INITIAL_STATE.bank;
+            const bankRangeOrder = parsed.bankRangeOrder && typeof parsed.bankRangeOrder === 'object' ? parsed.bankRangeOrder : (INITIAL_STATE.bankRangeOrder || {});
+            const normalizedLessonData = normalizeLessonData(parsed.lessonData, sortedLevels);
+            const quizPool = parsed.quizPool && Object.keys(parsed.quizPool).length > 0 ? { ...INITIAL_STATE.quizPool, ...parsed.quizPool } : INITIAL_STATE.quizPool;
 
-        const sections = ensureSectionItems(parsed.sections, sortedLevels, parsed.sectionPlans || INITIAL_STATE.sectionPlans);
+            const sections = ensureSectionItems(parsed.sections, sortedLevels, parsed.sectionPlans || INITIAL_STATE.sectionPlans);
 
-        return {
-          ...INITIAL_STATE,
-          ...parsed,
-          levels: sortedLevels,
-          sections,
-          bank,
-          quizPool,
-          lessonData: normalizedLessonData,
-        };
+            return {
+              ...INITIAL_STATE,
+              ...parsed,
+              levels: sortedLevels,
+              sections,
+              bank,
+              bankRangeOrder,
+              quizPool,
+              lessonData: normalizedLessonData,
+              hiddenLevels: Array.isArray(parsed.hiddenLevels) ? parsed.hiddenLevels : [],
+            };
+          }
+        } catch {
+          // continue checking next key
+        }
       }
-    } catch (err) {
-      console.warn('Failed to load local storage state', err);
     }
-    return INITIAL_STATE;
-  });
+  } catch (err) {
+    console.warn('Failed to load local storage state', err);
+  }
+  return INITIAL_STATE;
+}
+
+export default function App() {
+  const [state, setState] = useState<AppState>(loadSavedState);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('lesson');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [showFloatingTimer, setShowFloatingTimer] = useState<boolean>(true);
-  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('실시간 자동 백업 완료');
+  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('실시간 자동 저장 중');
 
-  // Automatic Real-time Auto-Save & Emergency Backup
+  // Automatic Real-time Auto-Save & Emergency Backup across multiple storage slots
   useEffect(() => {
     try {
       const serialized = JSON.stringify(state);
-      localStorage.setItem(STORAGE_KEY, serialized);
+      localStorage.setItem(PRIMARY_STORAGE_KEY, serialized);
+      localStorage.setItem('hanjaSystemData_live', serialized);
+      localStorage.setItem('hanjaSystemData_v11', serialized);
       localStorage.setItem(BACKUP_KEY, serialized);
       localStorage.setItem(BACKUP_SNAPSHOT_KEY, serialized);
       
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-      setAutoSaveStatus(`실시간 자동 저장됨 (${timeStr})`);
+      setAutoSaveStatus(`자동 저장됨 (${timeStr})`);
     } catch (err) {
       console.warn('Failed to persist to localStorage', err);
       setAutoSaveStatus('저장 오류');
     }
   }, [state]);
 
-  // Window beforeunload listener for guaranteed persistence
+  // Window beforeunload listener for guaranteed synchronous persistence
   useEffect(() => {
     const handleBeforeUnload = () => {
       try {
         const serialized = JSON.stringify(state);
-        localStorage.setItem(STORAGE_KEY, serialized);
+        localStorage.setItem(PRIMARY_STORAGE_KEY, serialized);
+        localStorage.setItem('hanjaSystemData_live', serialized);
         localStorage.setItem(BACKUP_KEY, serialized);
       } catch (e) {
         console.warn('beforeunload save error', e);

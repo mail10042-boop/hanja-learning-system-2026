@@ -11,7 +11,7 @@ import {
   Bell,
   Minimize2,
   Maximize2,
-  X,
+  Tv,
 } from 'lucide-react';
 import { AlarmSoundType, playAlarm, playBeep, playMasterAlarm } from '../utils/audio';
 
@@ -20,11 +20,12 @@ interface FloatingTimerProps {
 }
 
 const ALARM_STORAGE_KEY = 'hanja_timer_alarm_sound';
+const TIMER_SIZE_STORAGE_KEY = 'hanja_timer_size_mode';
 
 const ALARM_SOUND_OPTIONS: { id: AlarmSoundType; label: string; icon: string; desc: string }[] = [
-  { id: 'bell', label: '자명종 소리', icon: '⏰', desc: '따르릉~ 따르릉~' },
-  { id: 'bomb', label: '폭탄 소리', icon: '💣', desc: '휘익- 쾅! 쾅!' },
-  { id: 'funny', label: '끝! (웃긴 소리)', icon: '🤪', desc: '끝! 시간 끝났습니다~' },
+  { id: 'bell', label: '자명종', icon: '⏰', desc: '따르릉~ 따르릉~' },
+  { id: 'bomb', label: '폭탄 소리', icon: '💣', desc: '휘익- 쾅!' },
+  { id: 'funny', label: '웃긴 소리', icon: '🤪', desc: '끝! 시간 끝났습니다~' },
   { id: 'rooster', label: '닭 소리', icon: '🐓', desc: '꼬~끼~오~!' },
 ];
 
@@ -46,16 +47,31 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
     return 'bell';
   });
 
-  // Save selected sound
+  // Size Mode: 'large' (학생용 대형 시계), 'medium' (기본 표준), 'mini' (작은 칩)
+  const [sizeMode, setSizeMode] = useState<'large' | 'medium' | 'mini'>(() => {
+    try {
+      const saved = localStorage.getItem(TIMER_SIZE_STORAGE_KEY);
+      if (saved === 'large' || saved === 'medium' || saved === 'mini') {
+        return saved;
+      }
+    } catch {}
+    return 'medium'; // Default to medium/readable size for students
+  });
+
+  // Save selected sound & size
   useEffect(() => {
     try {
       localStorage.setItem(ALARM_STORAGE_KEY, alarmSound);
     } catch {}
   }, [alarmSound]);
 
-  // Widget UI State: DEFAULT TO 'mini' (항상 기본적으로 작게 되어 있고, 누르면 펼쳐짐)
-  const [sizeMode, setSizeMode] = useState<'mini' | 'normal'>('mini');
-  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem(TIMER_SIZE_STORAGE_KEY, sizeMode);
+    } catch {}
+  }, [sizeMode]);
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isDirectInputOpen, setIsDirectInputOpen] = useState<boolean>(false);
   const [inputMin, setInputMin] = useState<number>(0);
   const [inputSec, setInputSec] = useState<number>(0);
@@ -63,7 +79,8 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
   // Position & Dragging (fixed coordinate)
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     if (typeof window !== 'undefined') {
-      return { x: Math.max(16, window.innerWidth - 240), y: 76 };
+      const rightPadding = 290;
+      return { x: Math.max(16, window.innerWidth - rightPadding), y: 76 };
     }
     return { x: 100, y: 76 };
   });
@@ -85,8 +102,8 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
           if (prev <= 1) {
             setIsRunning(false);
             setIsAlarmActive(true);
-            playAlarm(soundEnabled, 3, alarmSound); // Play the selected sound!
-            setTimeout(() => setIsAlarmActive(false), 4200);
+            playAlarm(soundEnabled, 3, alarmSound);
+            setTimeout(() => setIsAlarmActive(false), 4500);
             return 0;
           }
           return prev - 1;
@@ -130,8 +147,8 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
       const dx = e.clientX - dragStartRef.current.startX;
       const dy = e.clientY - dragStartRef.current.startY;
 
-      const newX = Math.max(10, Math.min(window.innerWidth - 180, dragStartRef.current.initPosX + dx));
-      const newY = Math.max(10, Math.min(window.innerHeight - 60, dragStartRef.current.initPosY + dy));
+      const newX = Math.max(10, Math.min(window.innerWidth - 200, dragStartRef.current.initPosX + dx));
+      const newY = Math.max(10, Math.min(window.innerHeight - 80, dragStartRef.current.initPosY + dy));
 
       setPosition({ x: newX, y: newY });
     };
@@ -141,8 +158,8 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
       const dx = e.touches[0].clientX - dragStartRef.current.startX;
       const dy = e.touches[0].clientY - dragStartRef.current.startY;
 
-      const newX = Math.max(10, Math.min(window.innerWidth - 180, dragStartRef.current.initPosX + dx));
-      const newY = Math.max(10, Math.min(window.innerHeight - 60, dragStartRef.current.initPosY + dy));
+      const newX = Math.max(10, Math.min(window.innerWidth - 200, dragStartRef.current.initPosX + dx));
+      const newY = Math.max(10, Math.min(window.innerHeight - 80, dragStartRef.current.initPosY + dy));
 
       setPosition({ x: newX, y: newY });
     };
@@ -173,7 +190,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
       setIsRunning(true);
       return;
     }
-    playBeep(soundEnabled, 520, 0.08);
+    playBeep(soundEnabled, 540, 0.08);
     setIsRunning((prev) => !prev);
   };
 
@@ -189,7 +206,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
   };
 
   const setTimerExact = (sec: number) => {
-    playBeep(soundEnabled, 480, 0.06);
+    playBeep(soundEnabled, 520, 0.06);
     setIsRunning(false);
     setTotalSeconds(sec);
     setRemaining(sec);
@@ -198,7 +215,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
   };
 
   const adjustSec = (delta: number) => {
-    playBeep(soundEnabled, 440, 0.05);
+    playBeep(soundEnabled, 460, 0.05);
     setRemaining((prev) => {
       const next = Math.max(0, prev + delta);
       setTotalSeconds(next);
@@ -224,6 +241,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
 
   return (
     <div
+      id="floating-classroom-timer"
       style={{
         position: 'fixed',
         left: `${position.x}px`,
@@ -232,22 +250,21 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
       }}
       className={`select-none transition-all ${
         isAlarmActive
-          ? 'animate-bounce ring-4 ring-rose-500 shadow-2xl rounded-full'
-          : 'shadow-xl'
+          ? 'animate-bounce ring-4 ring-rose-500 shadow-2xl rounded-2xl'
+          : 'shadow-2xl'
       }`}
     >
-      {/* 1. ULTRA-COMPACT MINI MODE (기본 모드: 작게 표시, 누르면 전체 타이머로 확장) */}
+      {/* 1. MINI COMPACT CHIP MODE */}
       {sizeMode === 'mini' ? (
         <div
           onClick={() => {
             if (!isDragging) {
-              setSizeMode('normal');
+              setSizeMode('medium');
             }
           }}
-          className="bg-slate-900/95 hover:bg-slate-900 backdrop-blur-md border border-slate-700 hover:border-blue-400 text-white rounded-full shadow-2xl px-3 py-1.5 flex items-center gap-2 cursor-pointer transition ring-2 ring-blue-500/20 hover:ring-blue-500/50 active:scale-98 group"
-          title="클릭하면 큰 타이머 설정창이 나타납니다"
+          className="bg-slate-900/95 hover:bg-slate-900 backdrop-blur-md border border-slate-700 hover:border-blue-400 text-white rounded-full shadow-2xl px-3.5 py-2 flex items-center gap-2.5 cursor-pointer transition ring-2 ring-blue-500/20 hover:ring-blue-500/50 group"
+          title="클릭하면 큰 타이머로 확대됩니다"
         >
-          {/* Drag Grip Handle */}
           <div
             onMouseDown={(e) => {
               e.stopPropagation();
@@ -257,31 +274,23 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
               e.stopPropagation();
               handleTouchStart(e);
             }}
-            className="flex items-center gap-1 cursor-move text-slate-400 group-hover:text-slate-200 py-0.5"
-            title="마우스로 잡고 이동"
+            className="flex items-center gap-1 cursor-move text-slate-400 group-hover:text-slate-200"
           >
             <GripHorizontal className="w-3.5 h-3.5" />
-            <Clock className="w-3.5 h-3.5 text-blue-400" />
+            <Clock className="w-4 h-4 text-blue-400" />
           </div>
 
-          {/* Digital Time Counter */}
-          <span className="font-mono text-sm sm:text-base font-black text-emerald-400 tracking-wider">
+          <span className="font-mono text-lg font-black text-emerald-400 tracking-wider">
             {formatTime(remaining)}
           </span>
 
-          {/* Alarm Icon */}
-          <span className="text-xs" title={`알람 소리: ${currentOption.label}`}>
-            {currentOption.icon}
-          </span>
-
-          {/* Quick Play/Pause Button */}
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               toggleRun(e);
             }}
-            className={`p-1 rounded-full text-white font-bold transition cursor-pointer active:scale-90 ${
+            className={`p-1.5 rounded-full text-white font-bold transition cursor-pointer active:scale-90 ${
               isRunning ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'
             }`}
             title={isRunning ? '일시정지' : '시작'}
@@ -289,272 +298,314 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
             {isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
           </button>
 
-          {/* Quick Reset Button */}
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               handleResetToZero(e);
             }}
-            className="p-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer active:scale-90"
-            title="0초로 리셋"
+            className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer active:scale-90"
+            title="0초 리셋"
           >
-            <RotateCcw className="w-3 h-3" />
+            <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
-          {/* Expand Prompt Badge */}
-          <span className="text-[11px] font-bold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800/60 flex items-center gap-0.5 group-hover:bg-blue-900 transition">
-            <Maximize2 className="w-2.5 h-2.5" />
-            <span>설정</span>
+          <span className="text-xs font-bold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800/60 flex items-center gap-0.5">
+            <Maximize2 className="w-3 h-3" />
+            <span>확대</span>
           </span>
         </div>
       ) : (
-        /* 2. FULL EXPANDED TIMER (누르면 나타나는 전체 타이머 창) */
-        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700 text-white rounded-2xl shadow-2xl overflow-hidden w-64 sm:w-70 animate-in fade-in zoom-in-95 duration-150">
-          {/* Draggable Header with Close/Minimize to Mini button */}
+        /* 2. MEDIUM & LARGE STUDENT-VISIBLE CLASSROOM DISPLAY */
+        <div
+          className={`bg-slate-900/95 backdrop-blur-md border border-slate-700 text-white rounded-2xl shadow-2xl overflow-hidden transition-all duration-200 ${
+            sizeMode === 'large' ? 'w-80 sm:w-96' : 'w-72 sm:w-80'
+          }`}
+        >
+          {/* Header Bar */}
           <div
             onMouseDown={handleMouseDown}
             onTouchStart={handleTouchStart}
-            className="px-3 py-2 bg-slate-800/90 border-b border-slate-700/80 flex items-center justify-between cursor-move hover:bg-slate-800 transition"
-            title="마우스로 잡고 원하는 위치로 이동하세요"
+            className="px-3.5 py-2 bg-slate-800/95 border-b border-slate-700/80 flex items-center justify-between cursor-move hover:bg-slate-800 transition"
+            title="드래그하여 원하는 위치로 이동"
           >
             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
-              <GripHorizontal className="w-3.5 h-3.5 text-slate-400" />
-              <Clock className="w-3.5 h-3.5 text-blue-400" />
-              <span className="text-xs">수업 타이머</span>
+              <GripHorizontal className="w-4 h-4 text-slate-400" />
+              <Clock className="w-4 h-4 text-blue-400" />
+              <span className="font-extrabold tracking-tight">
+                {sizeMode === 'large' ? '학생용 대형 시계' : '수업 타이머'}
+              </span>
             </div>
 
+            {/* Size & Setting Buttons */}
             <div className="flex items-center gap-1">
               {isAlarmActive && (
-                <span className="text-[10px] font-black text-rose-400 animate-pulse flex items-center gap-0.5 mr-1">
-                  <Bell className="w-3 h-3" />
+                <span className="text-xs font-black text-rose-400 animate-pulse flex items-center gap-0.5 mr-1">
+                  <Bell className="w-3.5 h-3.5" />
                   <span>종료!</span>
                 </span>
               )}
 
-              {/* Minimize to Mini Pill button */}
+              {/* Toggle Large vs Medium */}
+              <button
+                type="button"
+                onClick={() => setSizeMode(sizeMode === 'large' ? 'medium' : 'large')}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                  sizeMode === 'large'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                }`}
+                title={sizeMode === 'large' ? '기본 크기로 축소' : '학생들이 잘 보이게 초대형으로 확대'}
+              >
+                <Tv className="w-3 h-3" />
+                <span>{sizeMode === 'large' ? '표준' : '대형'}</span>
+              </button>
+
+              {/* Minimize to mini chip */}
               <button
                 type="button"
                 onClick={() => setSizeMode('mini')}
-                className="px-2 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
-                title="기본 작은 모양으로 접기"
+                className="p-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white cursor-pointer"
+                title="작게 접기"
               >
-                <Minimize2 className="w-3 h-3 text-blue-400" />
-                <span>작게 접기</span>
+                <Minimize2 className="w-3.5 h-3.5" />
               </button>
 
+              {/* Settings Toggle */}
               <button
                 type="button"
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 transition cursor-pointer"
-                title={isExpanded ? '간단히 접기' : '더 많은 빠른시간 펼치기'}
+                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition cursor-pointer"
+                title="설정 및 알람 소리 선택"
               >
-                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                {isSettingsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
             </div>
           </div>
 
-          {/* Main Display & Core Controls */}
-          <div className="p-3 space-y-2.5">
-            <div className="flex items-center justify-between gap-1.5">
-              {/* Big Digital Display */}
+          {/* Core Visible Display Area */}
+          <div className="p-3 sm:p-4 space-y-3">
+            {/* BIG HIGH-VISIBILITY DIGITAL CLOCK (학생들이 멀리서도 뚜렷하게 확인 가능) */}
+            <div className="bg-slate-950 border-2 border-slate-800 rounded-xl p-3 sm:p-4 shadow-inner flex flex-col items-center justify-center relative">
               <div
                 onClick={() => setIsDirectInputOpen(!isDirectInputOpen)}
-                className="px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl font-mono text-2xl font-black text-emerald-400 tracking-wider flex-1 text-center cursor-pointer hover:border-blue-400 transition shadow-inner"
-                title="클릭하여 직접 분/초 설정"
+                className={`font-mono font-black text-emerald-400 tracking-widest leading-none drop-shadow-[0_0_12px_rgba(52,211,153,0.35)] cursor-pointer hover:text-emerald-300 transition ${
+                  sizeMode === 'large'
+                    ? 'text-4xl sm:text-5xl md:text-6xl py-1'
+                    : 'text-3xl sm:text-4xl py-0.5'
+                }`}
+                title="클릭하여 원하는 시간 직접 입력"
               >
                 {formatTime(remaining)}
               </div>
 
-              {/* Play/Pause Button */}
+              <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400 font-bold">
+                <span>{isRunning ? '⏱️ 카운트다운 진행 중' : remaining === 0 ? '대기 중 (00:00)' : '⏸️ 일시 정지됨'}</span>
+                <span>•</span>
+                <span>알람: {currentOption.icon} {currentOption.label}</span>
+              </div>
+            </div>
+
+            {/* Primary Action Buttons: Big Start/Pause & Reset */}
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={toggleRun}
-                className={`p-2.5 rounded-xl font-bold flex items-center justify-center transition cursor-pointer active:scale-95 shrink-0 shadow-xs ${
+                className={`py-2.5 px-3 rounded-xl font-black text-sm sm:text-base flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-md ${
                   isRunning
-                    ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                    ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                    : 'bg-emerald-500 hover:bg-emerald-600 text-slate-950'
                 }`}
-                title={isRunning ? '일시정지' : '타이머 시작'}
               >
-                {isRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                {isRunning ? (
+                  <>
+                    <Pause className="w-5 h-5 fill-current" />
+                    <span>일시정지</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-5 h-5 fill-current" />
+                    <span>{remaining === 0 ? '10초 시작' : '타이머 시작'}</span>
+                  </>
+                )}
               </button>
 
-              {/* Reset to 0 Seconds Button */}
               <button
                 type="button"
                 onClick={handleResetToZero}
-                className="p-2.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-white transition cursor-pointer active:scale-95 shrink-0 flex items-center gap-0.5"
-                title="0초로 리셋"
+                className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-rose-900/70 text-slate-200 hover:text-white font-black text-sm sm:text-base flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 border border-slate-700/80"
+                title="0초로 초기화"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span className="text-[10px] font-bold">0초</span>
+                <RotateCcw className="w-4 h-4" />
+                <span>0초 리셋</span>
               </button>
             </div>
 
-            {/* Quick Step Buttons */}
-            <div className="grid grid-cols-4 gap-1 text-[10px]">
-              <button
-                type="button"
-                onClick={() => adjustSec(-5)}
-                className="py-1.5 rounded-lg bg-slate-800/90 hover:bg-rose-900/80 text-slate-300 font-bold transition text-center cursor-pointer active:scale-95"
-              >
-                -5초
-              </button>
-              <button
-                type="button"
-                onClick={() => adjustSec(+5)}
-                className="py-1.5 rounded-lg bg-slate-800/90 hover:bg-emerald-900/80 text-slate-300 font-bold transition text-center cursor-pointer active:scale-95"
-              >
-                +5초
-              </button>
-              <button
-                type="button"
-                onClick={() => adjustSec(+10)}
-                className="py-1.5 rounded-lg bg-slate-800/90 hover:bg-blue-900/80 text-slate-300 font-bold transition text-center cursor-pointer active:scale-95"
-              >
-                +10초
-              </button>
-              <button
-                type="button"
-                onClick={() => adjustSec(+30)}
-                className="py-1.5 rounded-lg bg-slate-800/90 hover:bg-blue-900/80 text-slate-300 font-bold transition text-center cursor-pointer active:scale-95"
-              >
-                +30초
-              </button>
-            </div>
-
-            {/* 4 Alarm Sound Selector Bar */}
-            <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
-                <span className="flex items-center gap-1">
-                  <span>종료 알람:</span>
-                  <span className="text-amber-400 font-black">{currentOption.label}</span>
-                </span>
+            {/* Quick Preset Buttons for Classroom Speed */}
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-4 gap-1 text-xs">
                 <button
                   type="button"
-                  onClick={() => playMasterAlarm(alarmSound, true)}
-                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5 cursor-pointer bg-slate-800 px-1.5 py-0.5 rounded transition"
-                  title="현재 선택된 알람 소리 미리듣기"
+                  onClick={() => setTimerExact(10)}
+                  className="py-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-200 font-bold transition text-center cursor-pointer active:scale-95"
                 >
-                  <Volume2 className="w-2.5 h-2.5" />
-                  <span>시험</span>
+                  10초
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTimerExact(30)}
+                  className="py-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-200 font-bold transition text-center cursor-pointer active:scale-95"
+                >
+                  30초
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTimerExact(60)}
+                  className="py-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-200 font-bold transition text-center cursor-pointer active:scale-95"
+                >
+                  1분
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTimerExact(180)}
+                  className="py-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-200 font-bold transition text-center cursor-pointer active:scale-95"
+                >
+                  3분
                 </button>
               </div>
 
-              {/* 4 Sound Buttons Grid */}
-              <div className="grid grid-cols-2 gap-1 text-[10px]">
-                {ALARM_SOUND_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => {
-                      setAlarmSound(opt.id);
-                      playMasterAlarm(opt.id, soundEnabled);
-                    }}
-                    className={`py-1.5 px-2 rounded-lg font-bold transition flex items-center justify-between cursor-pointer active:scale-95 ${
-                      alarmSound === opt.id
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'bg-slate-800/90 text-slate-300 hover:bg-slate-700'
-                    }`}
-                    title={`${opt.label} (${opt.desc})`}
-                  >
-                    <span className="flex items-center gap-1">
-                      <span>{opt.icon}</span>
-                      <span className="truncate">{opt.label}</span>
-                    </span>
-                  </button>
-                ))}
+              {/* Adjust +/- Seconds */}
+              <div className="grid grid-cols-4 gap-1 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => adjustSec(-10)}
+                  className="py-1 rounded bg-slate-800/80 hover:bg-rose-900/80 text-slate-300 font-bold transition text-center cursor-pointer"
+                >
+                  -10초
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustSec(+10)}
+                  className="py-1 rounded bg-slate-800/80 hover:bg-emerald-900/80 text-slate-300 font-bold transition text-center cursor-pointer"
+                >
+                  +10초
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustSec(+30)}
+                  className="py-1 rounded bg-slate-800/80 hover:bg-blue-900/80 text-slate-300 font-bold transition text-center cursor-pointer"
+                >
+                  +30초
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustSec(+60)}
+                  className="py-1 rounded bg-slate-800/80 hover:bg-blue-900/80 text-slate-300 font-bold transition text-center cursor-pointer"
+                >
+                  +1분
+                </button>
               </div>
             </div>
 
-            {/* Direct Input Drawer */}
+            {/* Direct Custom Time Input */}
             {isDirectInputOpen && (
-              <div className="bg-slate-950 p-2 rounded-xl border border-blue-500/50 space-y-1.5 text-xs">
-                <div className="flex items-center justify-between text-slate-300 font-bold text-[10px]">
-                  <span>시간 직접 입력:</span>
+              <div className="bg-slate-950 p-2.5 rounded-xl border border-blue-500/60 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-slate-300 font-bold">
+                  <span>시간 직접 설정:</span>
                   <button
                     type="button"
                     onClick={() => setIsDirectInputOpen(false)}
-                    className="text-slate-500 hover:text-slate-300 text-[10px]"
+                    className="text-slate-400 hover:text-white"
                   >
-                    닫기
+                    ✕ 닫기
                   </button>
                 </div>
-                <div className="flex items-center gap-1 justify-center">
+                <div className="flex items-center gap-1.5 justify-center">
                   <input
                     type="number"
                     min={0}
                     max={99}
                     value={inputMin}
                     onChange={(e) => setInputMin(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-10 text-center py-0.5 bg-slate-900 border border-slate-700 rounded text-emerald-400 font-mono font-bold text-xs"
+                    className="w-12 text-center py-1 bg-slate-900 border border-slate-700 rounded-lg text-emerald-400 font-mono font-bold text-sm"
                   />
-                  <span className="text-slate-400 font-bold text-[10px]">분</span>
+                  <span className="text-slate-300 font-bold">분</span>
                   <input
                     type="number"
                     min={0}
                     max={59}
                     value={inputSec}
                     onChange={(e) => setInputSec(Math.min(59, Math.max(0, parseInt(e.target.value) || 0)))}
-                    className="w-10 text-center py-0.5 bg-slate-900 border border-slate-700 rounded text-emerald-400 font-mono font-bold text-xs"
+                    className="w-12 text-center py-1 bg-slate-900 border border-slate-700 rounded-lg text-emerald-400 font-mono font-bold text-sm"
                   />
-                  <span className="text-slate-400 font-bold text-[10px]">초</span>
+                  <span className="text-slate-300 font-bold">초</span>
                   <button
                     type="button"
                     onClick={handleApplyCustomTime}
-                    className="ml-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold text-[10px]"
+                    className="ml-1.5 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer"
                   >
-                    적용
+                    설정
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Expanded Presets */}
-            {isExpanded && (
-              <div className="pt-1.5 border-t border-slate-800 space-y-1.5 text-xs">
-                <div className="grid grid-cols-3 gap-1">
-                  {[
-                    { label: '10초', sec: 10 },
-                    { label: '30초', sec: 30 },
-                    { label: '1분', sec: 60 },
-                    { label: '3분', sec: 180 },
-                    { label: '5분', sec: 300 },
-                    { label: '10분', sec: 600 },
-                  ].map((p) => (
+            {/* Expandable Settings: Alarm Sounds and 5min/10min */}
+            {isSettingsOpen && (
+              <div className="pt-2 border-t border-slate-800 space-y-2 text-xs">
+                <div className="flex items-center justify-between font-bold text-slate-300 text-[11px]">
+                  <span>종료 알람 소리 선택</span>
+                  <button
+                    type="button"
+                    onClick={() => playMasterAlarm(alarmSound, true)}
+                    className="text-blue-400 hover:text-blue-300 flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded cursor-pointer"
+                  >
+                    <Volume2 className="w-3 h-3" />
+                    <span>소리 테스트</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  {ALARM_SOUND_OPTIONS.map((opt) => (
                     <button
-                      key={p.label}
+                      key={opt.id}
                       type="button"
-                      onClick={() => setTimerExact(p.sec)}
-                      className="py-1 rounded bg-slate-800 hover:bg-blue-600 text-slate-200 font-bold text-[10px] transition text-center cursor-pointer"
+                      onClick={() => {
+                        setAlarmSound(opt.id);
+                        playMasterAlarm(opt.id, soundEnabled);
+                      }}
+                      className={`py-1.5 px-2 rounded-lg font-bold transition flex items-center justify-between cursor-pointer active:scale-95 text-[11px] ${
+                        alarmSound === opt.id
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
                     >
-                      {p.label}
+                      <span className="flex items-center gap-1.5 truncate">
+                        <span>{opt.icon}</span>
+                        <span>{opt.label}</span>
+                      </span>
                     </button>
                   ))}
                 </div>
+
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setTimerExact(300)}
+                    className="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px]"
+                  >
+                    5분 타이머
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTimerExact(600)}
+                    className="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px]"
+                  >
+                    10분 타이머
+                  </button>
+                </div>
               </div>
             )}
-
-            {/* Bottom Minimize to Small Action Bar */}
-            <div className="pt-1 border-t border-slate-800 flex items-center justify-between text-[11px]">
-              <button
-                type="button"
-                onClick={() => setSizeMode('mini')}
-                className="text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer font-bold"
-              >
-                <Minimize2 className="w-3 h-3 text-blue-400" />
-                <span>항상 작게 표시하기 (접기)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsDirectInputOpen(!isDirectInputOpen)}
-                className="text-blue-400 hover:text-blue-300 underline cursor-pointer"
-              >
-                {isDirectInputOpen ? '직접입력 닫기' : '원하는 시간 직접입력'}
-              </button>
-            </div>
           </div>
         </div>
       )}
