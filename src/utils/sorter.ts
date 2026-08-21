@@ -40,3 +40,33 @@ export function sortRangesByPage(ranges: string[]): string[] {
     return a.localeCompare(b, 'ko-KR', { numeric: true });
   });
 }
+
+/**
+ * Returns the effective ordered list of ranges for a given level, respecting any custom user-defined
+ * order while ensuring all existing bank ranges are included.
+ */
+export function getOrderedBankRanges(
+  bank: Record<string, Record<string, any>> | undefined,
+  bankRangeOrder: Record<string, string[]> | undefined,
+  level: string
+): string[] {
+  const existingRanges = bank?.[level] ? Object.keys(bank[level]) : [];
+  if (existingRanges.length === 0) return [];
+
+  const customOrder = bankRangeOrder?.[level];
+  if (!customOrder || customOrder.length === 0) {
+    return sortRangesByPage(existingRanges);
+  }
+
+  // Filter existing from custom order
+  const existingSet = new Set(existingRanges);
+  const ordered = customOrder.filter((rng) => existingSet.has(rng));
+
+  // Find any new ranges that weren't in customOrder yet
+  const orderedSet = new Set(ordered);
+  const unplaced = existingRanges.filter((rng) => !orderedSet.has(rng));
+  const sortedUnplaced = sortRangesByPage(unplaced);
+
+  return [...ordered, ...sortedUnplaced];
+}
+

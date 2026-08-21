@@ -43,6 +43,7 @@ export interface AppState {
   sectionPlans: Record<string, Record<string, string>>; // Legacy mapping
   sectionSelectedLevels?: Record<string, string[]>; // Legacy mapping
   bank: Record<string, Record<string, RangeProblemData>>; // level -> rangeName -> RangeProblemData
+  bankRangeOrder?: Record<string, string[]>; // level -> custom ordered array of range names
   quizPool: Record<string, string[]>; // level -> array of Hanja meaning strings
   adminPassword: string;
   soundEnabled: boolean;

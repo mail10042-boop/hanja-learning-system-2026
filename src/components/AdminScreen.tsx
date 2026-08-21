@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Lock,
   Unlock,
@@ -22,11 +22,22 @@ import {
   HelpCircle,
   Shuffle,
   RefreshCw,
+  Search,
+  Filter,
+  X,
+  Hash,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronsUp,
+  ChevronsDown,
+  Sliders,
 } from 'lucide-react';
 import { AppState, RangeProblemData, SectionItem, SectionRowItem } from '../types';
 import { INITIAL_STATE } from '../data/initialData';
-import { sortRangesByPage } from '../utils/sorter';
+import { sortRangesByPage, getOrderedBankRanges } from '../utils/sorter';
 import { extractBaseLevel, sortHanjaLevels } from '../utils/levelOrder';
+import { RangeSearchPickerModal } from './RangeSearchPickerModal';
 
 interface AdminScreenProps {
   state: AppState;
@@ -81,6 +92,24 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   // Expanded row details for custom questions override
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [probSectionViewTab, setProbSectionViewTab] = useState<string>('all'); // 'all' | sectionId
+
+  // Range Search Picker Modal State
+  const [rangePickerModal, setRangePickerModal] = useState<{
+    isOpen: boolean;
+    rowId: string;
+    secId?: string; // undefined means all sections
+    baseLevel: string;
+    currentRange?: string;
+    title: string;
+    subtitle?: string;
+  } | null>(null);
+
+  // Quick Filter for Curriculum Table
+  const [curriculumSearchQuery, setCurriculumSearchQuery] = useState<string>('');
+  const [curriculumLevelFilter, setCurriculumLevelFilter] = useState<string>('all');
+
+  // Problem Bank Search and Filter State
+  const [bankSearchQuery, setBankSearchQuery] = useState<string>('');
 
   // --- QUIZ POOL MANAGEMENT STATE ---
   const [activeQuizLevel, setActiveQuizLevel] = useState<string>(state.levels[0] || '8급');
@@ -690,6 +719,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
     onUpdateState((prev) => {
       const currentLevelBank = prev.bank[activeBankLevel] || {};
+      const currentOrder = getOrderedBankRanges(prev.bank, prev.bankRangeOrder, activeBankLevel);
+      const nextOrder = currentOrder.includes(trimmedRange)
+        ? currentOrder
+        : [...currentOrder, trimmedRange];
+
       return {
         ...prev,
         bank: {
@@ -699,6 +733,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             [trimmedRange]: rangeEntry,
           },
         },
+        bankRangeOrder: {
+          ...(prev.bankRangeOrder || {}),
+          [activeBankLevel]: nextOrder,
+        },
       };
     });
 
@@ -707,7 +745,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     setProb2Text('');
     setProb3Text('');
     setProb4Text('');
-    showToast(`[${activeBankLevel}] 문제은행에 [${trimmedRange}] 범위가 페이지순으로 저장되었습니다.`);
+    showToast(`[${activeBankLevel}] 문제은행에 [${trimmedRange}] 범위가 저장되었습니다.`);
   };
 
   const handleDeleteBankRange = (lvl: string, rng: string) => {
@@ -724,11 +762,81 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             delete nextLevelRanges[rng];
             nextBank[lvl] = nextLevelRanges;
           }
-          return { ...prev, bank: nextBank };
+          const nextOrder = prev.bankRangeOrder?.[lvl]
+            ? prev.bankRangeOrder[lvl].filter((r) => r !== rng)
+            : undefined;
+
+          return {
+            ...prev,
+            bank: nextBank,
+            bankRangeOrder: {
+              ...(prev.bankRangeOrder || {}),
+              [lvl]: nextOrder || [],
+            },
+          };
         });
         showToast(`[${lvl} - ${rng}] 범위가 삭제되었습니다.`);
       },
     });
+  };
+
+  // Move problem bank range order up or down
+  const handleMoveBankRange = (lvl: string, fromIndex: number, direction: 'up' | 'down') => {
+    const currentOrdered = getOrderedBankRanges(state.bank, state.bankRangeOrder, lvl);
+    const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+    if (toIndex < 0 || toIndex >= currentOrdered.length) return;
+
+    const newOrder = [...currentOrdered];
+    const temp = newOrder[fromIndex];
+    newOrder[fromIndex] = newOrder[toIndex];
+    newOrder[toIndex] = temp;
+
+    onUpdateState((prev) => ({
+      ...prev,
+      bankRangeOrder: {
+        ...(prev.bankRangeOrder || {}),
+        [lvl]: newOrder,
+      },
+    }));
+    showToast(`[${temp}] 범위가 ${direction === 'up' ? '위로' : '아래로'} 이동되었습니다.`);
+  };
+
+  // Move problem bank range directly to top or bottom
+  const handleMoveBankRangeToEdge = (lvl: string, fromIndex: number, edge: 'top' | 'bottom') => {
+    const currentOrdered = getOrderedBankRanges(state.bank, state.bankRangeOrder, lvl);
+    if (currentOrdered.length <= 1) return;
+    const targetItem = currentOrdered[fromIndex];
+    const rest = currentOrdered.filter((_, idx) => idx !== fromIndex);
+    const newOrder = edge === 'top' ? [targetItem, ...rest] : [...rest, targetItem];
+
+    onUpdateState((prev) => ({
+      ...prev,
+      bankRangeOrder: {
+        ...(prev.bankRangeOrder || {}),
+        [lvl]: newOrder,
+      },
+    }));
+    showToast(`[${targetItem}] 범위가 ${edge === 'top' ? '맨 위로' : '맨 아래로'} 이동되었습니다.`);
+  };
+
+  // Auto-sort problem bank ranges by page or name and save custom order
+  const handleAutoSortBankRanges = (lvl: string, mode: 'page' | 'name') => {
+    const currentRanges = state.bank[lvl] ? Object.keys(state.bank[lvl]) : [];
+    let sorted: string[] = [];
+    if (mode === 'page') {
+      sorted = sortRangesByPage(currentRanges);
+    } else {
+      sorted = [...currentRanges].sort((a, b) => a.localeCompare(b, 'ko-KR', { numeric: true }));
+    }
+
+    onUpdateState((prev) => ({
+      ...prev,
+      bankRangeOrder: {
+        ...(prev.bankRangeOrder || {}),
+        [lvl]: sorted,
+      },
+    }));
+    showToast(`[${lvl}] 문제 범위가 ${mode === 'page' ? '페이지/과 번호순' : '가나다순'}으로 정렬되어 저장되었습니다.`);
   };
 
   // =========================================================================
@@ -829,8 +937,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     );
   }
 
-  const rawBankRanges = state.bank[activeBankLevel] ? Object.keys(state.bank[activeBankLevel]) : [];
-  const bankRangesForActiveLevel = sortRangesByPage(rawBankRanges);
+  const bankRangesForActiveLevel = getOrderedBankRanges(state.bank, state.bankRangeOrder, activeBankLevel);
 
   return (
     <div id="screen-admin" className="space-y-6 pb-12">
@@ -995,8 +1102,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
           {/* Unified Curriculum Rows Table/Card List */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+            <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-bold text-slate-800 text-sm">
                   등록된 통합 진도 목록 ({unifiedItems.length}개)
                 </span>
@@ -1004,15 +1111,72 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   (위/아래 이동 시 수업 화면의 모든 섹션 순서가 즉시 함께 바뀝니다)
                 </span>
               </div>
+
+              {/* Curriculum Search & Level Quick Filter */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={curriculumSearchQuery}
+                    onChange={(e) => setCurriculumSearchQuery(e.target.value)}
+                    placeholder="급수/진도/문제 검색..."
+                    className="pl-7 pr-7 py-1 text-xs rounded-lg border border-slate-300 bg-white font-medium focus:ring-1 focus:ring-blue-500 w-44"
+                  />
+                  {curriculumSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setCurriculumSearchQuery('')}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs p-0.5 cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <select
+                  value={curriculumLevelFilter}
+                  onChange={(e) => setCurriculumLevelFilter(e.target.value)}
+                  className="py-1 px-2 text-xs rounded-lg border border-slate-300 bg-white font-bold text-slate-700 cursor-pointer"
+                >
+                  <option value="all">전체 급수 필터</option>
+                  {state.levels.map((lvl) => (
+                    <option key={lvl} value={lvl}>
+                      {lvl}만 보기
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {unifiedItems.length > 0 ? (
               <div className="divide-y divide-slate-200">
-                {unifiedItems.map((row, rowIdx) => {
+                {unifiedItems
+                  .map((row, rowIdx) => ({ row, rowIdx }))
+                  .filter(({ row }) => {
+                    const baseLvl = row.baseLevel || extractBaseLevel(row.levelLabel);
+                    if (curriculumLevelFilter !== 'all' && baseLvl !== curriculumLevelFilter) {
+                      return false;
+                    }
+                    if (!curriculumSearchQuery.trim()) return true;
+
+                    const query = curriculumSearchQuery.trim().toLowerCase();
+                    const labelMatch = row.levelLabel.toLowerCase().includes(query);
+                    const rangeMatches = activeSections.some((sec) => {
+                      const secItem = sec.items?.find((r) => r.id === row.id) || row;
+                      const rName = (secItem.rangeName || '').toLowerCase();
+                      const p1 = (secItem.customProb1 || '').toLowerCase();
+                      const p2 = (secItem.customProb2 || '').toLowerCase();
+                      const p3 = (secItem.customProb3 || '').toLowerCase();
+                      const p4 = (secItem.customProb4 || '').toLowerCase();
+                      return rName.includes(query) || p1.includes(query) || p2.includes(query) || p3.includes(query) || p4.includes(query);
+                    });
+
+                    return labelMatch || rangeMatches;
+                  })
+                  .map(({ row, rowIdx }) => {
                   const baseLvl = row.baseLevel || extractBaseLevel(row.levelLabel);
-                  const baseBankRanges = sortRangesByPage(
-                    state.bank[baseLvl] ? Object.keys(state.bank[baseLvl]) : []
-                  );
+                  const baseBankRanges = getOrderedBankRanges(state.bank, state.bankRangeOrder, baseLvl);
                   const isExpanded = expandedRowId === row.id;
 
                   return (
@@ -1078,34 +1242,57 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
                             return (
                               <div key={sec.id} className={`p-2 rounded-xl border ${secColor} space-y-1`}>
-                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 gap-1">
                                   <span>{sec.name} 진도</span>
-                                  {baseBankRanges.length > 0 && (
-                                    <select
-                                      onChange={(e) => {
-                                        if (e.target.value) {
-                                          handleSelectBankRangeForSection(sec.id, row.id, e.target.value, baseLvl);
-                                        }
-                                      }}
-                                      value={baseBankRanges.includes(secRowItem.rangeName) ? secRowItem.rangeName : ''}
-                                      className="text-[10px] bg-white border border-slate-300 rounded px-1 py-0.5 text-blue-700 font-bold max-w-[95px] cursor-pointer"
-                                      title="문제은행 범위에서 선택"
+                                  <div className="flex items-center gap-1">
+                                    {/* Quick Search Modal Opener */}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setRangePickerModal({
+                                          isOpen: true,
+                                          rowId: row.id,
+                                          secId: sec.id,
+                                          baseLevel: baseLvl,
+                                          currentRange: secRowItem.rangeName,
+                                          title: `[${sec.name}] 진도 범위 검색 및 선택`,
+                                          subtitle: `[${row.levelLabel} / 기준: ${baseLvl}] 과(1과, 2과...) 또는 페이지(165p, 25쪽...)로 쉽게 찾아 선택합니다.`,
+                                        })
+                                      }
+                                      className="text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-bold flex items-center gap-0.5 cursor-pointer shadow-2xs transition"
+                                      title="과나 페이지로 문제은행 범위 쉽게 검색하고 선택하기"
                                     >
-                                      <option value="">문제은행</option>
-                                      {baseBankRanges.map((rng) => (
-                                        <option key={rng} value={rng}>
-                                          {rng}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  )}
+                                      <Search className="w-3 h-3 text-blue-600" />
+                                      <span>과/페이지 검색</span>
+                                    </button>
+
+                                    {baseBankRanges.length > 0 && (
+                                      <select
+                                        onChange={(e) => {
+                                          if (e.target.value) {
+                                            handleSelectBankRangeForSection(sec.id, row.id, e.target.value, baseLvl);
+                                          }
+                                        }}
+                                        value={baseBankRanges.includes(secRowItem.rangeName) ? secRowItem.rangeName : ''}
+                                        className="text-[10px] bg-white border border-slate-300 rounded px-1 py-0.5 text-blue-700 font-bold max-w-[80px] cursor-pointer"
+                                        title="문제은행 목록에서 선택"
+                                      >
+                                        <option value="">목록</option>
+                                        {baseBankRanges.map((rng) => (
+                                          <option key={rng} value={rng}>
+                                            {rng}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    )}
+                                  </div>
                                 </div>
 
                                 <input
                                   type="text"
                                   value={secRowItem.rangeName || ''}
                                   onChange={(e) => handleUpdateSectionRange(sec.id, row.id, e.target.value)}
-                                  placeholder={`${sec.name} 진도 입력...`}
+                                  placeholder={`${sec.name} 진도 입력 (예: 10과 역사와 철학)...`}
                                   className="w-full px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-xs font-semibold focus:ring-1 focus:ring-blue-500"
                                 />
                               </div>
@@ -1214,10 +1401,28 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                               })}
                             </div>
 
-                            {/* Batch apply to all sections dropdown */}
+                            {/* Batch apply to all sections dropdown & search */}
                             {baseBankRanges.length > 0 && (
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-[11px] text-slate-500 font-semibold">전체 일괄 적용:</span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRangePickerModal({
+                                      isOpen: true,
+                                      rowId: row.id,
+                                      secId: undefined, // All sections
+                                      baseLevel: baseLvl,
+                                      currentRange: row.rangeName,
+                                      title: `[전체 섹션] 일괄 진도 및 문제 범위 검색`,
+                                      subtitle: `[${row.levelLabel} / 기준: ${baseLvl}] 과(1과, 2과...) 또는 페이지(165p, 25쪽...)로 검색하여 A·B·C 모든 섹션에 한 번에 적용합니다.`,
+                                    })
+                                  }
+                                  className="px-2 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-xs flex items-center gap-1 cursor-pointer shadow-2xs transition"
+                                >
+                                  <Search className="w-3.5 h-3.5" />
+                                  <span>과/페이지 검색</span>
+                                </button>
                                 <select
                                   onChange={(e) => {
                                     if (e.target.value) {
@@ -1225,10 +1430,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                                     }
                                   }}
                                   defaultValue=""
-                                  className="px-2 py-1 rounded-md border border-slate-300 font-bold text-xs bg-slate-50 text-slate-700 cursor-pointer"
+                                  className="px-2 py-1 rounded-md border border-slate-300 font-bold text-xs bg-slate-50 text-slate-700 cursor-pointer max-w-[140px]"
                                 >
                                   <option value="" disabled>
-                                    문제은행 범위 선택...
+                                    목록에서 선택...
                                   </option>
                                   {baseBankRanges.map((rng) => (
                                     <option key={rng} value={rng}>
@@ -1292,27 +1497,49 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
                                       {/* Quick Problem Bank Loader for this specific section */}
                                       <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 text-xs space-y-1.5">
-                                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
-                                          <span className="flex items-center gap-1">
+                                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 gap-1">
+                                          <span className="flex items-center gap-1 shrink-0">
                                             <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                                            <span>[{sec.name}] 문제은행 불러오기:</span>
+                                            <span>[{sec.name}] 문제은행:</span>
                                           </span>
-                                          {secBankData && (
+                                          <div className="flex items-center gap-1">
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                handleResetSectionProblemsToBank(
-                                                  sec.id,
-                                                  row.id,
-                                                  baseLvl,
-                                                  secRowItem.rangeName
-                                                )
+                                                setRangePickerModal({
+                                                  isOpen: true,
+                                                  rowId: row.id,
+                                                  secId: sec.id,
+                                                  baseLevel: baseLvl,
+                                                  currentRange: secRowItem.rangeName,
+                                                  title: `[${sec.name}] 문제은행 범위 검색 및 불러오기`,
+                                                  subtitle: `[${row.levelLabel} / 기준: ${baseLvl}] 원하는 과(1과, 2과...)나 페이지(165p, 25쪽...)를 검색하여 ${sec.name}의 진도와 1~4번 문제로 불러옵니다.`,
+                                                })
                                               }
-                                              className="text-[10px] text-blue-600 hover:underline cursor-pointer"
+                                              className="text-[10px] bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-bold flex items-center gap-0.5 cursor-pointer shadow-2xs transition"
+                                              title="과나 페이지로 검색"
                                             >
-                                              기본값 복원
+                                              <Search className="w-3 h-3 text-blue-600" />
+                                              <span>과/페이지 검색</span>
                                             </button>
-                                          )}
+                                            {secBankData && (
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  handleResetSectionProblemsToBank(
+                                                    sec.id,
+                                                    row.id,
+                                                    baseLvl,
+                                                    secRowItem.rangeName
+                                                  )
+                                                }
+                                                className="text-[10px] text-slate-500 hover:text-blue-600 underline cursor-pointer"
+                                                title="문제은행의 원본 문제로 되돌리기"
+                                              >
+                                                복원
+                                              </button>
+                                            )}
+                                          </div>
                                         </div>
 
                                         {baseBankRanges.length > 0 ? (
@@ -1751,39 +1978,157 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
           {/* Registered Ranges in Bank */}
           <div className="lg:col-span-6 bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-2.5 gap-2">
               <div className="flex items-center gap-1.5">
                 <ListPlus className="w-4 h-4 text-blue-600" />
                 <h4 className="text-sm font-bold text-slate-800">
                   [{activeBankLevel}] 등록된 문제 ({bankRangesForActiveLevel.length}개)
                 </h4>
               </div>
-              <span className="text-xs text-slate-400">페이지순 정렬</span>
+              <div className="flex items-center gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => handleAutoSortBankRanges(activeBankLevel, 'page')}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px]"
+                  title="페이지/과 번호 오름차순으로 자동 정렬하여 순서 저장"
+                >
+                  <ArrowUpDown className="w-3 h-3 text-blue-600" />
+                  <span>페이지순 자동 정렬</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAutoSortBankRanges(activeBankLevel, 'name')}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer text-[11px]"
+                  title="가나다 알파벳순으로 정렬하여 순서 저장"
+                >
+                  <span>가나다순</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick helper tip banner */}
+            <div className="bg-blue-50/70 border border-blue-100 rounded-xl px-3 py-1.5 flex items-center justify-between text-[11px] text-blue-800">
+              <span>💡 각 항목의 <strong>▲ / ▼ 이동 버튼</strong>을 눌러 원하는 순서대로 자유롭게 배치할 수 있습니다.</span>
+            </div>
+
+            {/* Problem Bank Search Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={bankSearchQuery}
+                onChange={(e) => setBankSearchQuery(e.target.value)}
+                placeholder={`[${activeBankLevel}] 범위명(과/페이지) 또는 문제 내용 검색...`}
+                className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50/50 font-medium focus:ring-2 focus:ring-blue-500"
+              />
+              {bankSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setBankSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              )}
             </div>
 
             {bankRangesForActiveLevel.length > 0 ? (
-              <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
-                {bankRangesForActiveLevel.map((rng) => {
+              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                {bankRangesForActiveLevel
+                  .map((rng, originalIdx) => ({ rng, originalIdx }))
+                  .filter(({ rng }) => {
+                    if (!bankSearchQuery.trim()) return true;
+                    const q = bankSearchQuery.trim().toLowerCase();
+                    const entry = state.bank[activeBankLevel]?.[rng];
+                    const rngMatch = rng.toLowerCase().includes(q);
+                    const probMatch = entry && (
+                      (entry.prob1 || '').toLowerCase().includes(q) ||
+                      (entry.prob2 || '').toLowerCase().includes(q) ||
+                      (entry.prob3 || '').toLowerCase().includes(q) ||
+                      (entry.prob4 || '').toLowerCase().includes(q)
+                    );
+                    return rngMatch || probMatch;
+                  })
+                  .map(({ rng, originalIdx }) => {
                   const entry = state.bank[activeBankLevel]?.[rng];
+                  const isFirst = originalIdx === 0;
+                  const isLast = originalIdx === bankRangesForActiveLevel.length - 1;
+
                   return (
                     <div
                       key={rng}
-                      className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2 text-xs"
+                      className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition space-y-2 text-xs"
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-800 text-sm">📍 {rng}</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {/* Order index badge */}
+                          <span className="shrink-0 text-[10px] font-extrabold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-md font-mono">
+                            #{originalIdx + 1}
+                          </span>
+
+                          {/* Up / Down Reorder buttons */}
+                          <div className="flex items-center gap-0.5 shrink-0 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
+                            <button
+                              type="button"
+                              onClick={() => handleMoveBankRange(activeBankLevel, originalIdx, 'up')}
+                              disabled={isFirst}
+                              className={`p-1 rounded transition cursor-pointer ${
+                                isFirst ? 'text-slate-300 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-100 hover:text-blue-600'
+                              }`}
+                              title="한 칸 위로 이동"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveBankRange(activeBankLevel, originalIdx, 'down')}
+                              disabled={isLast}
+                              className={`p-1 rounded transition cursor-pointer ${
+                                isLast ? 'text-slate-300 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-100 hover:text-blue-600'
+                              }`}
+                              title="한 칸 아래로 이동"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveBankRangeToEdge(activeBankLevel, originalIdx, 'top')}
+                              disabled={isFirst}
+                              className={`p-1 rounded transition cursor-pointer ${
+                                isFirst ? 'text-slate-300 cursor-not-allowed' : 'text-slate-500 hover:bg-slate-100 hover:text-blue-600'
+                              }`}
+                              title="맨 위로 이동"
+                            >
+                              <ChevronsUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveBankRangeToEdge(activeBankLevel, originalIdx, 'bottom')}
+                              disabled={isLast}
+                              className={`p-1 rounded transition cursor-pointer ${
+                                isLast ? 'text-slate-300 cursor-not-allowed' : 'text-slate-500 hover:bg-slate-100 hover:text-blue-600'
+                              }`}
+                              title="맨 아래로 이동"
+                            >
+                              <ChevronsDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <span className="font-bold text-slate-800 text-sm truncate">📍 {rng}</span>
+                        </div>
+
                         <button
                           type="button"
                           onClick={() => handleDeleteBankRange(activeBankLevel, rng)}
-                          className="text-rose-500 hover:text-rose-700 cursor-pointer"
+                          className="p-1 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer shrink-0"
                           title="삭제"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
 
                       {entry && (
-                        <div className="space-y-1 text-slate-700 text-[11px] bg-white p-2 rounded-lg border border-slate-200">
+                        <div className="space-y-1 text-slate-700 text-[11px] bg-white p-2.5 rounded-lg border border-slate-200">
                           {entry.prob1 && <div><span className="font-bold text-blue-700">문제1:</span> {entry.prob1}</div>}
                           {entry.prob2 && <div><span className="font-bold text-blue-700">문제2:</span> {entry.prob2}</div>}
                           {entry.prob3 && <div><span className="font-bold text-blue-700">문제3:</span> {entry.prob3}</div>}
@@ -1852,6 +2197,40 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Range Search & Picker Modal */}
+      {rangePickerModal && rangePickerModal.isOpen && (
+        <RangeSearchPickerModal
+          isOpen={rangePickerModal.isOpen}
+          onClose={() => setRangePickerModal(null)}
+          onSelectRange={(selectedRangeName) => {
+            if (rangePickerModal.secId) {
+              // Apply to specific section
+              handleSelectBankRangeForSection(
+                rangePickerModal.secId,
+                rangePickerModal.rowId,
+                selectedRangeName,
+                rangePickerModal.baseLevel
+              );
+              showToast(`[${selectedRangeName}] 범위가 성공적으로 적용되었습니다.`);
+            } else {
+              // Apply to all sections
+              handleApplyBankRangeToAllSections(
+                rangePickerModal.rowId,
+                selectedRangeName,
+                rangePickerModal.baseLevel
+              );
+              showToast(`[${selectedRangeName}] 범위가 모든 섹션(A·B·C)에 일괄 적용되었습니다.`);
+            }
+          }}
+          baseLevel={rangePickerModal.baseLevel}
+          availableRanges={getOrderedBankRanges(state.bank, state.bankRangeOrder, rangePickerModal.baseLevel)}
+          bankProblems={state.bank[rangePickerModal.baseLevel] || {}}
+          currentSelectedRange={rangePickerModal.currentRange}
+          title={rangePickerModal.title}
+          subtitle={rangePickerModal.subtitle}
+        />
       )}
     </div>
   );

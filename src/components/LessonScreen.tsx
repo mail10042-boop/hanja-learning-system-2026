@@ -14,7 +14,8 @@ import {
 import { AppState, SectionItem, SectionRowItem } from '../types';
 import { INITIAL_STATE } from '../data/initialData';
 import { playBeep } from '../utils/audio';
-import { extractBaseLevel, sortRangesByPage } from '../utils/levelOrder';
+import { extractBaseLevel } from '../utils/levelOrder';
+import { getOrderedBankRanges } from '../utils/sorter';
 
 interface LessonScreenProps {
   state: AppState;
@@ -554,9 +555,7 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                     const itemKey = `${sec.id}_${item.id}`;
                     const isEditingRange = editingRangeItemKey === itemKey;
                     const baseLvl = item.baseLevel || extractBaseLevel(item.levelLabel);
-                    const bankRanges = sortRangesByPage(
-                      state.bank[baseLvl] ? Object.keys(state.bank[baseLvl]) : []
-                    );
+                    const bankRanges = getOrderedBankRanges(state.bank, state.bankRangeOrder, baseLvl);
 
                     return (
                       <div
