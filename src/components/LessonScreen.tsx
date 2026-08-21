@@ -8,12 +8,13 @@ import {
   Trash2,
   Edit2,
   Check,
+  X,
   Layers,
 } from 'lucide-react';
 import { AppState, SectionItem, SectionRowItem } from '../types';
 import { INITIAL_STATE } from '../data/initialData';
 import { playBeep } from '../utils/audio';
-import { extractBaseLevel } from '../utils/levelOrder';
+import { extractBaseLevel, sortRangesByPage } from '../utils/levelOrder';
 
 interface LessonScreenProps {
   state: AppState;
@@ -63,9 +64,40 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editTitleInput, setEditTitleInput] = useState<string>('');
 
+  // Individual item progress range inline editing state
+  const [editingRangeItemKey, setEditingRangeItemKey] = useState<string | null>(null);
+  const [editingRangeValue, setEditingRangeValue] = useState<string>('');
+
   // Add Item to Section popover or toggle
   const [openAddBoxSecId, setOpenAddBoxSecId] = useState<string | null>(null);
   const [customAddInput, setCustomAddInput] = useState<string>('');
+
+  // Update range for a single item in a specific section
+  const handleSaveItemRange = (secId: string, rowId: string, newRange: string) => {
+    const trimmed = newRange.trim();
+    if (!trimmed) {
+      setEditingRangeItemKey(null);
+      return;
+    }
+    playBeep(state.soundEnabled, 650, 0.05);
+    onUpdateState((prev) => {
+      const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
+      const nextSections = currentSections.map((sec) => {
+        if (sec.id === secId) {
+          return {
+            ...sec,
+            items: (sec.items || []).map((r) => (r.id === rowId ? { ...r, rangeName: trimmed } : r)),
+          };
+        }
+        return sec;
+      });
+      return {
+        ...prev,
+        sections: nextSections,
+      };
+    });
+    setEditingRangeItemKey(null);
+  };
 
   // Add new section (D, E, F...)
   const handleAddSection = () => {
@@ -97,10 +129,6 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   // Delete section
   const handleDeleteSection = (secId: string, secName: string) => {
     if (activeSections.length <= 1) {
-      alert('최소 1개 이상의 섹션이 필요합니다.');
-      return;
-    }
-    if (!window.confirm(`[${secName}]을(를) 삭제하시겠습니까?`)) {
       return;
     }
 
@@ -179,36 +207,49 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
     setEditingSectionId(null);
   };
 
-  // Add Item to a Section (e.g. 준5급 0, 준5급 1, etc.)
+  // Add Item to ALL Sections simultaneously (e.g. 준5급 0, 준5급 1, etc.)
   const handleAddItemToSection = (secId: string, label: string) => {
     const trimmed = label.trim();
     if (!trimmed) return;
 
     playBeep(state.soundEnabled, 750, 0.06);
-    const newRow: SectionRowItem = {
-      id: `row_${secId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      levelLabel: trimmed,
-      rangeName: `${trimmed} 진도 범위`,
-    };
+    const baseLvl = extractBaseLevel(trimmed);
+    const commonRowId = `row_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
     onUpdateState((prev) => {
       const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
       return {
         ...prev,
-        sections: currentSections.map((s) => (s.id === secId ? { ...s, items: [...(s.items || []), newRow] } : s)),
+        sections: currentSections.map((s, secIdx) => {
+          const bankRanges = prev.bank[baseLvl] ? Object.keys(prev.bank[baseLvl]) : [];
+          const defaultRange = bankRanges[secIdx % Math.max(1, bankRanges.length)] || `${trimmed} 진도 범위`;
+          const newRow: SectionRowItem = {
+            id: commonRowId,
+            levelLabel: trimmed,
+            baseLevel: baseLvl,
+            rangeName: defaultRange,
+          };
+          return {
+            ...s,
+            items: [...(s.items || []), newRow],
+          };
+        }),
       };
     });
 
     setCustomAddInput('');
   };
 
-  // Remove an Item from a section
+  // Remove an Item from ALL sections
   const handleDeleteItemFromSection = (secId: string, rowId: string) => {
     onUpdateState((prev) => {
       const currentSections = prev.sections && prev.sections.length > 0 ? prev.sections : activeSections;
       return {
         ...prev,
-        sections: currentSections.map((s) => (s.id === secId ? { ...s, items: (s.items || []).filter((r) => r.id !== rowId) } : s)),
+        sections: currentSections.map((s) => ({
+          ...s,
+          items: (s.items || []).filter((r) => r.id !== rowId),
+        })),
       };
     });
   };
@@ -510,38 +551,135 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
               {visibleItems.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {visibleItems.map((item) => {
+                    const itemKey = `${sec.id}_${item.id}`;
+                    const isEditingRange = editingRangeItemKey === itemKey;
+                    const baseLvl = item.baseLevel || extractBaseLevel(item.levelLabel);
+                    const bankRanges = sortRangesByPage(
+                      state.bank[baseLvl] ? Object.keys(state.bank[baseLvl]) : []
+                    );
+
                     return (
                       <div
                         key={item.id}
-                        className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-white hover:border-slate-300 transition flex items-start justify-between gap-2 shadow-2xs min-h-[58px]"
+                        className={`p-3 rounded-xl border transition flex flex-col justify-between gap-2 shadow-2xs min-h-[64px] ${
+                          isEditingRange
+                            ? 'bg-blue-50/70 border-blue-400 ring-2 ring-blue-200'
+                            : 'border-slate-200 bg-slate-50/70 hover:bg-white hover:border-slate-300'
+                        }`}
                       >
-                        <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                          <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-slate-800 text-white font-black text-xs sm:text-sm min-w-[54px] shrink-0 mt-0.5 shadow-2xs">
-                            {item.levelLabel}
-                          </span>
-                          {/* Range Text is fully visible and large */}
-                          <div className="text-slate-900 font-bold text-sm sm:text-base leading-snug break-words flex-1 whitespace-normal">
-                            {item.rangeName || '(진도 범위 미설정)'}
-                          </div>
-                        </div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                            <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-slate-800 text-white font-black text-xs sm:text-sm min-w-[54px] shrink-0 mt-0.5 shadow-2xs">
+                              {item.levelLabel}
+                            </span>
 
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => onToggleLevelHide(item.levelLabel)}
-                            className="text-[11px] p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-600 transition cursor-pointer"
-                            title={`${item.levelLabel} 화면에서 숨기기`}
-                          >
-                            <EyeOff className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteItemFromSection(sec.id, item.id)}
-                            className="text-[11px] p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
-                            title="이 항목 삭제"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                            {/* Range display or inline editor */}
+                            {isEditingRange ? (
+                              <div className="flex-1 space-y-1.5 min-w-0">
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    value={editingRangeValue}
+                                    onChange={(e) => setEditingRangeValue(e.target.value)}
+                                    placeholder={`${sec.name} 진도 범위 입력...`}
+                                    className="flex-1 px-2 py-1 text-xs sm:text-sm font-bold rounded-lg border border-blue-400 bg-white focus:ring-2 focus:ring-blue-500"
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleSaveItemRange(sec.id, item.id, editingRangeValue);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingRangeItemKey(null);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveItemRange(sec.id, item.id, editingRangeValue)}
+                                    className="p-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer shadow-2xs shrink-0"
+                                    title="저장"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingRangeItemKey(null)}
+                                    className="p-1 rounded-lg bg-slate-200 text-slate-600 hover:bg-slate-300 cursor-pointer shrink-0"
+                                    title="취소"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                {bankRanges.length > 0 && (
+                                  <div className="flex items-center gap-1 text-[11px] text-slate-600">
+                                    <span className="text-slate-400 text-[10px]">문제은행:</span>
+                                    <select
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          setEditingRangeValue(e.target.value);
+                                        }
+                                      }}
+                                      defaultValue=""
+                                      className="text-[11px] bg-white border border-slate-300 rounded px-1.5 py-0.5 text-blue-700 font-bold max-w-[140px] cursor-pointer"
+                                    >
+                                      <option value="">범위 선택...</option>
+                                      {bankRanges.map((rng) => (
+                                        <option key={rng} value={rng}>
+                                          {rng}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div
+                                onClick={() => {
+                                  setEditingRangeItemKey(itemKey);
+                                  setEditingRangeValue(item.rangeName || '');
+                                }}
+                                className="text-slate-900 font-bold text-sm sm:text-base leading-snug break-words flex-1 whitespace-normal cursor-pointer group flex items-start justify-between gap-1"
+                                title={`클릭하여 [${sec.name}] 진도 수정`}
+                              >
+                                <span>{item.rangeName || '(진도 범위 미설정)'}</span>
+                                <span className="opacity-0 group-hover:opacity-100 text-blue-600 p-0.5 rounded hover:bg-blue-50 transition shrink-0">
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {!isEditingRange && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingRangeItemKey(itemKey);
+                                  setEditingRangeValue(item.rangeName || '');
+                                }}
+                                className="text-[11px] p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition cursor-pointer"
+                                title={`[${sec.name}] 진도 수정`}
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onToggleLevelHide(item.levelLabel)}
+                                className="text-[11px] p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-600 transition cursor-pointer"
+                                title={`${item.levelLabel} 화면에서 숨기기`}
+                              >
+                                <EyeOff className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteItemFromSection(sec.id, item.id)}
+                                className="text-[11px] p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                                title="이 항목 삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

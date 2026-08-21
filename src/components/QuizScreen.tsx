@@ -40,7 +40,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({ state }) => {
     }
 
     if (combinedPool.length === 0) {
-      alert(`[${lvl}]에 등록된 한자 뜻·음 풀이 없습니다. 관리자 모드에서 한자를 등록해주세요.`);
+      setGeneratedItems([]);
       return;
     }
 

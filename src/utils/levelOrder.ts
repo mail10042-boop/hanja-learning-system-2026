@@ -49,3 +49,14 @@ export function sortSectionRowItems(items: SectionRowItem[]): SectionRowItem[] {
     return a.levelLabel.localeCompare(b.levelLabel, 'ko');
   });
 }
+
+export function sortRangesByPage(ranges: string[]): string[] {
+  return [...ranges].sort((a, b) => {
+    const matchA = a.match(/(\d+)/);
+    const matchB = b.match(/(\d+)/);
+    const numA = matchA ? parseInt(matchA[1], 10) : 999;
+    const numB = matchB ? parseInt(matchB[1], 10) : 999;
+    if (numA !== numB) return numA - numB;
+    return a.localeCompare(b, 'ko');
+  });
+}

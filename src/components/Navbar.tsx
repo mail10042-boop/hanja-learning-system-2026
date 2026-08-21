@@ -24,6 +24,7 @@ interface NavbarProps {
   isAdminAuthenticated: boolean;
   showFloatingTimer: boolean;
   onToggleFloatingTimer: () => void;
+  autoSaveStatus?: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -38,6 +39,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   isAdminAuthenticated,
   showFloatingTimer,
   onToggleFloatingTimer,
+  autoSaveStatus,
 }) => {
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
@@ -49,9 +51,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               漢
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-1.5">
-                한자 학습 보조 관리 시스템
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+                  한자 학습 보조 관리 시스템
+                </h1>
+                {autoSaveStatus && (
+                  <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-700 font-bold text-[10px]" title={autoSaveStatus}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span>자동저장 ON</span>
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-500 font-medium">
                 초·중등 한자 급수별 수업 진행 및 실시간 문제 출제
               </p>

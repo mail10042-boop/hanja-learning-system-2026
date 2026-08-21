@@ -8,8 +8,9 @@ import { AdminScreen } from './components/AdminScreen';
 import { FloatingTimer } from './components/FloatingTimer';
 import { sortHanjaLevels, sortSectionRowItems } from './utils/levelOrder';
 
-const STORAGE_KEY = 'hanjaSystemData_v9';
+const STORAGE_KEY = 'hanjaSystemData_v11';
 const BACKUP_KEY = 'hanja_auto_backup_latest';
+const BACKUP_SNAPSHOT_KEY = 'hanja_auto_backup_snapshot';
 
 function normalizeLessonData(rawLessonData: unknown, baseLevels: string[]): Record<string, LevelLessonPlan> {
   const result: Record<string, LevelLessonPlan> = {};
@@ -40,26 +41,50 @@ function ensureSectionItems(sections: any[], levels: string[], sectionPlans: any
     return INITIAL_STATE.sections;
   }
 
+  // Find master items template (usually from first section)
+  const masterSec = sections[0];
+  const masterItems: SectionRowItem[] = masterSec?.items && Array.isArray(masterSec.items) && masterSec.items.length > 0
+    ? masterSec.items
+    : INITIAL_STATE.sections[0].items;
+
   return sections.map((sec, idx) => {
     const secId = sec.id || `sec_${idx + 1}`;
     const secName = sec.name || `섹션 ${String.fromCharCode(65 + idx)}`;
-    const role = sec.role || 'today';
+    const role = sec.role || (idx === 0 ? 'prev' : idx === 1 ? 'today' : 'next');
 
+    // If section has items, align them to master structure while preserving individual rangeName
     if (sec.items && Array.isArray(sec.items) && sec.items.length > 0) {
+      // Map master items to ensure row order and IDs match across all sections
+      const alignedItems: SectionRowItem[] = masterItems.map((mItem, rIdx) => {
+        const existingInSec = sec.items.find(
+          (it: any) => it.id === mItem.id || it.levelLabel === mItem.levelLabel
+        );
+        return {
+          id: mItem.id,
+          levelLabel: mItem.levelLabel,
+          baseLevel: mItem.baseLevel,
+          rangeName: existingInSec?.rangeName || sec.items[rIdx]?.rangeName || mItem.rangeName,
+          customProb1: existingInSec?.customProb1 ?? mItem.customProb1,
+          customProb2: existingInSec?.customProb2 ?? mItem.customProb2,
+          customProb3: existingInSec?.customProb3 ?? mItem.customProb3,
+          customProb4: existingInSec?.customProb4 ?? mItem.customProb4,
+        };
+      });
+
       return {
         id: secId,
         name: secName,
         role,
-        items: sec.items,
+        items: alignedItems,
       };
     }
 
-    // Convert from levels/sectionPlans
+    // Fallback: convert from levels/sectionPlans
     const chosenLevels = sec.selectedLevels?.length ? sec.selectedLevels : levels;
     const generatedItems: SectionRowItem[] = chosenLevels.map((lvl: string, rIdx: number) => {
       const range = sectionPlans?.[secId]?.[lvl] || `${lvl} 진도 범위`;
       return {
-        id: `row_${secId}_${rIdx}_${Date.now()}`,
+        id: `row_${rIdx}_${lvl}`,
         levelLabel: lvl,
         rangeName: range,
       };
@@ -77,7 +102,7 @@ function ensureSectionItems(sections: any[], levels: string[], sectionPlans: any
 export default function App() {
   const [state, setState] = useState<AppState>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('hanjaSystemData_v8') || localStorage.getItem(BACKUP_KEY);
+      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('hanjaSystemData_v9') || localStorage.getItem('hanjaSystemData_v8') || localStorage.getItem(BACKUP_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         const rawLevels = parsed.levels?.length ? parsed.levels : INITIAL_STATE.levels;
@@ -110,20 +135,36 @@ export default function App() {
   const [showFloatingTimer, setShowFloatingTimer] = useState<boolean>(true);
   const [autoSaveStatus, setAutoSaveStatus] = useState<string>('실시간 자동 백업 완료');
 
-  // Automatic Real-time Auto-Save & Auto-Backup
+  // Automatic Real-time Auto-Save & Emergency Backup
   useEffect(() => {
     try {
       const serialized = JSON.stringify(state);
       localStorage.setItem(STORAGE_KEY, serialized);
       localStorage.setItem(BACKUP_KEY, serialized);
+      localStorage.setItem(BACKUP_SNAPSHOT_KEY, serialized);
       
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-      setAutoSaveStatus(`실시간 자동 백업 완료 (${timeStr})`);
+      setAutoSaveStatus(`실시간 자동 저장됨 (${timeStr})`);
     } catch (err) {
       console.warn('Failed to persist to localStorage', err);
       setAutoSaveStatus('저장 오류');
     }
+  }, [state]);
+
+  // Window beforeunload listener for guaranteed persistence
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      try {
+        const serialized = JSON.stringify(state);
+        localStorage.setItem(STORAGE_KEY, serialized);
+        localStorage.setItem(BACKUP_KEY, serialized);
+      } catch (e) {
+        console.warn('beforeunload save error', e);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [state]);
 
   // Adjust root element font size dynamically
@@ -194,6 +235,7 @@ export default function App() {
         isAdminAuthenticated={isAdminAuthenticated}
         showFloatingTimer={showFloatingTimer}
         onToggleFloatingTimer={() => setShowFloatingTimer((prev) => !prev)}
+        autoSaveStatus={autoSaveStatus}
       />
 
       {/* Globally Draggable Floating Timer across all views & scrolling */}
