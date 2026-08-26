@@ -1,103 +1,69 @@
-import React, { useState, useEffect } from 'react';
-import { ActiveTab, AppState, LevelLessonPlan, SectionItem, SectionRowItem } from './types';
-import { INITIAL_STATE } from './data/initialData';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { LessonScreen } from './components/LessonScreen';
 import { QuizScreen } from './components/QuizScreen';
 import { AdminScreen } from './components/AdminScreen';
 import { FloatingTimer } from './components/FloatingTimer';
-import { sortHanjaLevels, sortSectionRowItems } from './utils/levelOrder';
+import { AppState, ActiveTab } from './types';
+import { INITIAL_STATE } from './data/initialData';
+import { sortHanjaLevels } from './utils/levelOrder';
 
+const PRIMARY_STORAGE_KEY = 'hanjaSystemData_v12_primary';
 const STORAGE_KEYS_TO_TRY = [
+  PRIMARY_STORAGE_KEY,
   'hanjaSystemData_live',
-  'hanjaSystemData_main',
   'hanjaSystemData_v11',
-  'hanjaSystemData_v10',
-  'hanjaSystemData_v9',
-  'hanjaSystemData_v8',
-  'hanjaSystemData_v7',
-  'hanja_auto_backup_latest',
-  'hanja_auto_backup_snapshot',
-  'hanja_user_backup',
+  'hanjaSystemData_backup',
+  'hanjaSystemData_snapshot',
 ];
+const BACKUP_KEY = 'hanjaSystemData_backup';
+const BACKUP_SNAPSHOT_KEY = 'hanjaSystemData_snapshot';
 
-const PRIMARY_STORAGE_KEY = 'hanjaSystemData_main';
-const BACKUP_KEY = 'hanja_auto_backup_latest';
-const BACKUP_SNAPSHOT_KEY = 'hanja_auto_backup_snapshot';
-
-function normalizeLessonData(rawLessonData: unknown, baseLevels: string[]): Record<string, LevelLessonPlan> {
-  const result: Record<string, LevelLessonPlan> = {};
-  const dataObj = typeof rawLessonData === 'object' && rawLessonData !== null ? (rawLessonData as Record<string, any>) : {};
-  const allLevels = Array.from(new Set([...baseLevels, ...Object.keys(dataObj)]));
-
-  for (const lvl of allLevels) {
-    const rawLevel = dataObj[lvl];
-    const initialLevel = INITIAL_STATE.lessonData[lvl] || INITIAL_STATE.lessonData['8급'] || { planA: '', planB: '', planC: '' };
-
-    const getPlanStr = (key: 'A' | 'B' | 'C') => {
-      const planVal = rawLevel?.[`plan${key}`];
-      if (typeof planVal === 'string' && planVal) return planVal;
-      return initialLevel[`plan${key}`] || '';
-    };
-
-    result[lvl] = {
-      planA: getPlanStr('A'),
-      planB: getPlanStr('B'),
-      planC: getPlanStr('C'),
-    };
-  }
-  return result;
-}
-
-function ensureSectionItems(sections: any[], levels: string[], sectionPlans: any): SectionItem[] {
+// Helper to ensure section items have baseLevel
+function ensureSectionItems(sections: any[], sortedLevels: string[], defaultPlans: Record<string, string[]>) {
   if (!sections || !Array.isArray(sections) || sections.length === 0) {
-    return INITIAL_STATE.sections;
+    return (INITIAL_STATE.sections || []).map((sec) => ({
+      ...sec,
+      items: (sec.items || []).map((item: any, idx: number) => ({
+        ...item,
+        baseLevel: item.baseLevel || sortedLevels[idx % sortedLevels.length] || '기초',
+      })),
+    }));
   }
 
-  return sections.map((sec, idx) => {
-    const secId = sec.id || `sec_${idx + 1}`;
-    const secName = sec.name || `섹션 ${String.fromCharCode(65 + idx)}`;
-    const role = sec.role || (idx === 0 ? 'prev' : idx === 1 ? 'today' : 'next');
-
-    // If section has items, preserve every single item cleanly
-    if (sec.items && Array.isArray(sec.items) && sec.items.length > 0) {
-      const sanitizedItems: SectionRowItem[] = sec.items.map((it: any, rIdx: number) => ({
-        id: it.id || `row_${secId}_${rIdx}_${Date.now()}`,
-        levelLabel: it.levelLabel || (levels[rIdx] || '8급'),
-        baseLevel: it.baseLevel || undefined,
-        rangeName: typeof it.rangeName === 'string' ? it.rangeName : '',
-        customProb1: it.customProb1,
-        customProb2: it.customProb2,
-        customProb3: it.customProb3,
-        customProb4: it.customProb4,
-      }));
-
+  return sections.map((sec) => {
+    const rawItems = Array.isArray(sec.items) ? sec.items : [];
+    const sanitizedItems = rawItems.map((item: any, idx: number) => {
+      const bLvl = item?.baseLevel || sortedLevels[idx % sortedLevels.length] || '기초';
       return {
-        id: secId,
-        name: secName,
-        role,
-        items: sanitizedItems,
-      };
-    }
-
-    // Fallback: convert from levels/sectionPlans
-    const chosenLevels = sec.selectedLevels?.length ? sec.selectedLevels : levels;
-    const generatedItems: SectionRowItem[] = chosenLevels.map((lvl: string, rIdx: number) => {
-      const range = sectionPlans?.[secId]?.[lvl] || `${lvl} 진도 범위`;
-      return {
-        id: `row_${rIdx}_${lvl}`,
-        levelLabel: lvl,
-        rangeName: range,
+        id: item?.id || `item_${Date.now()}_${idx}`,
+        baseLevel: bLvl,
+        rangeName: typeof item?.rangeName === 'string' ? item.rangeName : '',
       };
     });
-
     return {
-      id: secId,
-      name: secName,
-      role,
-      items: generatedItems,
+      ...sec,
+      items: sanitizedItems,
     };
   });
+}
+
+function normalizeLessonData(data: any, sortedLevels: string[]) {
+  if (!data || typeof data !== 'object') return INITIAL_STATE.lessonData;
+  const result: Record<string, any> = { ...INITIAL_STATE.lessonData, ...data };
+  sortedLevels.forEach((lvl) => {
+    if (!result[lvl]) {
+      result[lvl] = {
+        level: lvl,
+        todayRange: '',
+        prob1: '',
+        prob2: '',
+        prob3: '',
+        prob4: '',
+      };
+    }
+  });
+  return result;
 }
 
 function parseAndSanitizeState(parsed: any): AppState {
@@ -153,9 +119,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('lesson');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [showFloatingTimer, setShowFloatingTimer] = useState<boolean>(true);
-  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('클라우드 동기화 확인 중...');
+  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('클라우드 실시간 동기화 연결 중...');
 
-  // 1. Initial Cloud Sync: Load persistent state from server on app boot
+  // Track unique client session ID so this device doesn't overwrite its own active typing updates
+  const myClientIdRef = useRef<string>(`client_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
+  const isSelfSavingRef = useRef<boolean>(false);
+
+  // 1. Initial Cloud State Fetch on App Boot
   useEffect(() => {
     let isMounted = true;
     async function syncFromCloud() {
@@ -166,16 +136,16 @@ export default function App() {
           if (data.success && data.exists && data.state && isMounted) {
             const sanitized = parseAndSanitizeState(data.state);
             setState(sanitized);
-            setAutoSaveStatus('클라우드 동기화 완료 (모든 기기 연동)');
+            setAutoSaveStatus('클라우드 실시간 자동 연동 완료 (모든 PC/태블릿)');
             setIsCloudLoaded(true);
             return;
           } else if (data.success && !data.exists) {
-            // If server has no state file yet, seed server with existing client state
+            // Seed cloud storage with initial state
             const currentLocal = loadSavedState();
             await fetch('/api/state', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ state: currentLocal }),
+              body: JSON.stringify({ state: currentLocal, clientId: myClientIdRef.current }),
             });
             if (isMounted) {
               setAutoSaveStatus('클라우드 초기 동기화 완료');
@@ -183,7 +153,7 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.warn('Failed to fetch state from server, using localStorage:', err);
+        console.warn('Initial server state fetch failed, fallback to local storage:', err);
         if (isMounted) {
           setAutoSaveStatus('로컬 데이터 사용 중 (오프라인)');
         }
@@ -199,9 +169,66 @@ export default function App() {
     };
   }, []);
 
-  // 2. Real-time LocalStorage Persistence and Debounced Cloud Auto-Sync
+  // 2. Real-Time Server-Sent Events (SSE) Cross-Device Live Broadcast Listener
+  // When another iPad, Samsung tablet, or PC edits a problem/curriculum, this instant stream updates automatically!
   useEffect(() => {
-    // Immediate local storage backup
+    let eventSource: EventSource | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+
+    function connectSSE() {
+      try {
+        eventSource = new EventSource('/api/state/stream');
+
+        eventSource.onopen = () => {
+          setAutoSaveStatus('실시간 클라우드 자동 동기화 ON');
+        };
+
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'CONNECTED') {
+              // Connected successfully to live sync stream
+            } else if (data.type === 'STATE_UPDATED' && data.state) {
+              // Ignore if broadcast is from this same device's recent save
+              if (data.senderClientId && data.senderClientId === myClientIdRef.current) {
+                return;
+              }
+
+              // Update state instantly from remote computer/tablet change
+              const sanitized = parseAndSanitizeState(data.state);
+              setState(sanitized);
+              setAutoSaveStatus('다른 기기에서 실시간 동기화됨');
+            }
+          } catch (e) {
+            console.warn('SSE message parse error', e);
+          }
+        };
+
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+          }
+          // Attempt graceful reconnect after 4 seconds
+          reconnectTimeout = setTimeout(connectSSE, 4000);
+        };
+      } catch (err) {
+        console.warn('EventSource initialization error', err);
+      }
+    }
+
+    connectSSE();
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+      clearTimeout(reconnectTimeout);
+    };
+  }, []);
+
+  // 3. Real-time Local Storage + Cloud Auto-Save
+  useEffect(() => {
+    // Immediate local storage persistence
     try {
       const serialized = JSON.stringify(state);
       localStorage.setItem(PRIMARY_STORAGE_KEY, serialized);
@@ -215,25 +242,26 @@ export default function App() {
 
     if (!isCloudLoaded) return;
 
-    setAutoSaveStatus('클라우드 동기화 중...');
+    // Debounced automatic Cloud upload & multi-device broadcast
     const syncTimer = setTimeout(async () => {
       try {
+        isSelfSavingRef.current = true;
         const res = await fetch('/api/state', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state }),
+          body: JSON.stringify({ state, clientId: myClientIdRef.current }),
         });
         if (res.ok) {
           const now = new Date();
           const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-          setAutoSaveStatus(`클라우드 자동 저장됨 (${timeStr})`);
-        } else {
-          setAutoSaveStatus('로컬 저장 완료 (서버 대기)');
+          setAutoSaveStatus(`클라우드 실시간 동기화됨 (${timeStr})`);
         }
-      } catch {
-        setAutoSaveStatus('로컬 저장 완료 (오프라인 모드)');
+      } catch (err) {
+        console.warn('Cloud sync error:', err);
+      } finally {
+        isSelfSavingRef.current = false;
       }
-    }, 600);
+    }, 500);
 
     return () => clearTimeout(syncTimer);
   }, [state, isCloudLoaded]);
@@ -259,88 +287,21 @@ export default function App() {
     document.documentElement.style.fontSize = `${state.fontSize}px`;
   }, [state.fontSize]);
 
-  const handleIncreaseFont = () => {
-    setState((prev) => ({
-      ...prev,
-      fontSize: Math.min(26, prev.fontSize + 1),
-    }));
-  };
-
-  const handleDecreaseFont = () => {
-    setState((prev) => ({
-      ...prev,
-      fontSize: Math.max(14, prev.fontSize - 1),
-    }));
-  };
-
-  const handleResetFont = () => {
-    setState((prev) => ({
-      ...prev,
-      fontSize: 18,
-    }));
-  };
-
-  const handleToggleSound = () => {
-    setState((prev) => ({
-      ...prev,
-      soundEnabled: !prev.soundEnabled,
-    }));
-  };
-
-  const handleToggleLevelHide = (level: string) => {
-    setState((prev) => {
-      const isHidden = prev.hiddenLevels.includes(level);
-      const nextHidden = isHidden
-        ? prev.hiddenLevels.filter((l) => l !== level)
-        : [...prev.hiddenLevels, level];
-      return {
-        ...prev,
-        hiddenLevels: nextHidden,
-      };
-    });
-  };
-
-  const handleRestoreAllLevels = () => {
-    setState((prev) => ({
-      ...prev,
-      hiddenLevels: [],
-    }));
-  };
-
   return (
-    <div className="min-h-screen bg-slate-100/90 text-slate-800 flex flex-col font-sans selection:bg-blue-200">
-      {/* Top Navigation & Controls */}
+    <div className="min-h-screen bg-slate-100 flex flex-col text-slate-800 antialiased selection:bg-blue-600 selection:text-white pb-16">
+      {/* Top Navigation */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        fontSize={state.fontSize}
-        onIncreaseFont={handleIncreaseFont}
-        onDecreaseFont={handleDecreaseFont}
-        onResetFont={handleResetFont}
-        soundEnabled={state.soundEnabled}
-        onToggleSound={handleToggleSound}
         isAdminAuthenticated={isAdminAuthenticated}
-        showFloatingTimer={showFloatingTimer}
-        onToggleFloatingTimer={() => setShowFloatingTimer((prev) => !prev)}
+        setIsAdminAuthenticated={setIsAdminAuthenticated}
         autoSaveStatus={autoSaveStatus}
       />
 
-      {/* Globally Draggable Floating Timer across all views & scrolling */}
-      {showFloatingTimer && <FloatingTimer soundEnabled={state.soundEnabled} />}
-
-      {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {activeTab === 'lesson' && (
-          <LessonScreen
-            state={state}
-            onUpdateState={setState}
-            onToggleLevelHide={handleToggleLevelHide}
-            onRestoreAllLevels={handleRestoreAllLevels}
-          />
-        )}
-
-        {activeTab === 'quiz' && <QuizScreen state={state} />}
-
+      {/* Main Content Area */}
+      <main className="flex-1 w-full max-w-[1750px] mx-auto px-2 sm:px-4 md:px-6 py-4 sm:py-6">
+        {activeTab === 'lesson' && <LessonScreen state={state} onUpdateState={setState} />}
+        {activeTab === 'quiz' && <QuizScreen state={state} onUpdateState={setState} />}
         {activeTab === 'admin' && (
           <AdminScreen
             state={state}
@@ -351,18 +312,13 @@ export default function App() {
         )}
       </main>
 
-      {/* Classroom Footer with Auto-Save Badge */}
-      <footer className="border-t border-slate-200 bg-white py-3.5 text-center text-xs text-slate-500 print:hidden">
-        <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>한자 학습 보조 관리 시스템 (초·중등 급수별 한자 교육 보조 도구)</span>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-700 font-semibold text-[11px]">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>{autoSaveStatus}</span>
-            </span>
-          </div>
-        </div>
-      </footer>
+      {/* Global Floating Timer overlay */}
+      {showFloatingTimer && (
+        <FloatingTimer
+          durationMinutes={state.timerMinutes || 10}
+          onClose={() => setShowFloatingTimer(false)}
+        />
+      )}
     </div>
   );
 }
