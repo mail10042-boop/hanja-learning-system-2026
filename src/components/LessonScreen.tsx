@@ -11,6 +11,11 @@ import {
   Maximize2,
   Columns,
   Rows,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Sliders,
+  Type,
 } from 'lucide-react';
 import { AppState, SectionItem, SectionRowItem } from '../types';
 import { INITIAL_STATE } from '../data/initialData';
@@ -58,9 +63,29 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   
   // Section arrangement: 'columns' (섹션 A,B,C 나란히 한 화면에) vs 'stacked' (상하로 넓게)
   const [sectionLayout, setSectionLayout] = useState<'columns' | 'stacked'>('columns');
+
+  // Problem view arrangement: 'grid' (나란히 3열) vs 'stacked' (세로 펼침 1열 와이드)
+  const [problemLayout, setProblemLayout] = useState<'grid' | 'stacked'>('grid');
   
-  // Font scale: 'standard' | 'large' | 'huge'
-  const [fontSizeScale, setFontSizeScale] = useState<'standard' | 'large' | 'huge'>('large');
+  // Custom font scale percentage (50% ~ 400%, arbitrary custom zoom)
+  const [fontScale, setFontScale] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('hanja_lesson_font_scale_pct');
+      if (saved) {
+        const num = Number(saved);
+        if (!isNaN(num) && num >= 50 && num <= 400) return num;
+      }
+    } catch {}
+    return 130; // default 130%
+  });
+
+  const handleUpdateFontScale = (newScale: number) => {
+    const clamped = Math.max(50, Math.min(400, Math.round(newScale)));
+    setFontScale(clamped);
+    try {
+      localStorage.setItem('hanja_lesson_font_scale_pct', String(clamped));
+    } catch {}
+  };
 
   // Focus Modal for single-grade fullscreen classroom projection
   const [focusModalItem, setFocusModalItem] = useState<{ item: SectionRowItem; secName: string } | null>(null);
@@ -325,29 +350,36 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
     return '';
   };
 
-  // Typography font size classes for Range and Problem texts
-  // Crucial: No truncation! Full word-wrapping and crystal clear visibility!
-  const getRangeTextClass = () => {
-    switch (fontSizeScale) {
-      case 'standard':
-        return 'text-sm sm:text-base font-extrabold';
-      case 'large':
-        return 'text-base sm:text-lg md:text-xl font-black';
-      case 'huge':
-        return 'text-lg sm:text-xl md:text-2xl font-black';
-    }
-  };
+  // Scaled style helpers for Range and Problem texts (User arbitrary zoom 50% ~ 400%)
+  const fontRatio = fontScale / 100;
 
-  const getProblemTextClass = () => {
-    switch (fontSizeScale) {
-      case 'standard':
-        return 'text-lg sm:text-xl md:text-2xl font-black';
-      case 'large':
-        return 'text-xl sm:text-2xl md:text-3xl font-black';
-      case 'huge':
-        return 'text-2xl sm:text-3xl md:text-4xl font-black';
-    }
-  };
+  const getRangeTextStyle = (): React.CSSProperties => ({
+    fontSize: `${(1.15 * fontRatio).toFixed(2)}rem`,
+    lineHeight: 1.35,
+    fontWeight: 900,
+  });
+
+  const getRangeBadgeStyle = (): React.CSSProperties => ({
+    fontSize: `${Math.max(0.75, 0.95 * fontRatio).toFixed(2)}rem`,
+    minWidth: `${Math.max(48, Math.round(58 * Math.min(2.2, Math.max(0.8, fontRatio * 0.95))))}px`,
+  });
+
+  const getProblemGridTextStyle = (): React.CSSProperties => ({
+    fontSize: `${(1.4 * fontRatio).toFixed(2)}rem`,
+    lineHeight: 1.25,
+    fontWeight: 900,
+  });
+
+  const getProblemStackedTextStyle = (): React.CSSProperties => ({
+    fontSize: `${(1.75 * fontRatio).toFixed(2)}rem`,
+    lineHeight: 1.25,
+    fontWeight: 900,
+  });
+
+  const getProblemBadgeStyle = (): React.CSSProperties => ({
+    fontSize: `${Math.max(0.85, 1.1 * fontRatio).toFixed(2)}rem`,
+    minWidth: `${Math.max(54, Math.round(64 * Math.min(2.2, Math.max(0.8, fontRatio * 0.95))))}px`,
+  });
 
   // Find target section for problem section
   const currentProblemSection = activeSections.find((s) => s.id === problemSectionId) || activeSections[0];
@@ -370,7 +402,7 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
               onClick={() => setDisplayMode('ranges')}
               className={`px-3 py-1 rounded-md transition cursor-pointer ${
                 displayMode === 'ranges'
-                  ? 'bg-blue-600 text-white shadow-2xs font-black'
+                  ? 'bg-slate-800 text-white shadow-2xs font-black'
                   : 'hover:bg-slate-200 text-slate-700'
               }`}
             >
@@ -381,7 +413,7 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
               onClick={() => setDisplayMode('both')}
               className={`px-3 py-1 rounded-md transition cursor-pointer ${
                 displayMode === 'both'
-                  ? 'bg-blue-600 text-white shadow-2xs font-black'
+                  ? 'bg-slate-800 text-white shadow-2xs font-black'
                   : 'hover:bg-slate-200 text-slate-700'
               }`}
             >
@@ -392,7 +424,7 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
               onClick={() => setDisplayMode('problems')}
               className={`px-3 py-1 rounded-md transition cursor-pointer ${
                 displayMode === 'problems'
-                  ? 'bg-blue-600 text-white shadow-2xs font-black'
+                  ? 'bg-slate-800 text-white shadow-2xs font-black'
                   : 'hover:bg-slate-200 text-slate-700'
               }`}
             >
@@ -401,7 +433,7 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
           </div>
         </div>
 
-        {/* Center/Right: Section Layout & Font Size */}
+        {/* Center/Right: Section Layout, Problem Layout & Custom Font Zoom */}
         <div className="flex items-center gap-2 flex-wrap">
           {/* Section Layout Switch (섹션 A, B, C 나란히 보기 vs 세로 펼치기) */}
           {(displayMode === 'ranges' || displayMode === 'both') && (
@@ -411,26 +443,58 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                 onClick={() => setSectionLayout('columns')}
                 className={`px-2.5 py-0.5 rounded-md transition cursor-pointer flex items-center gap-1 ${
                   sectionLayout === 'columns'
-                    ? 'bg-white text-blue-700 shadow-2xs font-black'
+                    ? 'bg-white text-slate-900 shadow-2xs font-black'
                     : 'hover:bg-slate-200'
                 }`}
                 title="섹션 A, B, C를 좌우 열로 나란히 배치하여 한 화면에 모두 보이게 합니다"
               >
                 <Columns className="w-3 h-3" />
-                <span>섹션 나란히(한 화면)</span>
+                <span>진도 나란히</span>
               </button>
               <button
                 type="button"
                 onClick={() => setSectionLayout('stacked')}
                 className={`px-2.5 py-0.5 rounded-md transition cursor-pointer flex items-center gap-1 ${
                   sectionLayout === 'stacked'
-                    ? 'bg-white text-blue-700 shadow-2xs font-black'
+                    ? 'bg-white text-slate-900 shadow-2xs font-black'
                     : 'hover:bg-slate-200'
                 }`}
                 title="섹션들을 위아래로 넓게 펼칩니다"
               >
                 <Rows className="w-3 h-3" />
-                <span>세로 펼침</span>
+                <span>진도 세로 펼침</span>
+              </button>
+            </div>
+          )}
+
+          {/* Problem Layout Switch (문제 나란히 그리드 vs 세로 펼침) */}
+          {(displayMode === 'problems' || displayMode === 'both') && (
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg font-bold text-slate-700">
+              <button
+                type="button"
+                onClick={() => setProblemLayout('grid')}
+                className={`px-2.5 py-0.5 rounded-md transition cursor-pointer flex items-center gap-1 ${
+                  problemLayout === 'grid'
+                    ? 'bg-white text-slate-900 shadow-2xs font-black'
+                    : 'hover:bg-slate-200'
+                }`}
+                title="확인 문제를 3열 그리드로 나란히 배치합니다"
+              >
+                <Columns className="w-3 h-3" />
+                <span>문제 그리드(3열)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setProblemLayout('stacked')}
+                className={`px-2.5 py-0.5 rounded-md transition cursor-pointer flex items-center gap-1 ${
+                  problemLayout === 'stacked'
+                    ? 'bg-white text-slate-900 shadow-2xs font-black'
+                    : 'hover:bg-slate-200'
+                }`}
+                title="확인 문제를 1열 와이드 세로 펼침으로 크게 봅니다"
+              >
+                <Rows className="w-3 h-3" />
+                <span>문제 세로 펼침</span>
               </button>
             </div>
           )}
@@ -439,42 +503,109 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
           <button
             type="button"
             onClick={handleAddSection}
-            className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-blue-50 text-blue-700 border border-blue-200 font-bold flex items-center gap-1 transition cursor-pointer"
+            className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold flex items-center gap-1 transition cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>+ 새 섹션</span>
           </button>
 
-          {/* Font Scale */}
-          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg font-bold text-slate-700">
-            <span className="px-1.5 text-slate-400 font-semibold hidden md:inline">글자:</span>
-            <button
-              type="button"
-              onClick={() => setFontSizeScale('standard')}
-              className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
-                fontSizeScale === 'standard' ? 'bg-white text-blue-700 shadow-2xs font-black' : 'hover:bg-slate-200'
-              }`}
-            >
-              표준
-            </button>
-            <button
-              type="button"
-              onClick={() => setFontSizeScale('large')}
-              className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
-                fontSizeScale === 'large' ? 'bg-blue-600 text-white shadow-2xs font-black' : 'hover:bg-slate-200'
-              }`}
-            >
-              크게(권장)
-            </button>
-            <button
-              type="button"
-              onClick={() => setFontSizeScale('huge')}
-              className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
-                fontSizeScale === 'huge' ? 'bg-indigo-600 text-white shadow-2xs font-black' : 'hover:bg-slate-200'
-              }`}
-            >
-              특대
-            </button>
+          {/* Custom Font Scale Controller (자유자재 글자 크기 조절: 슬라이더 + +/- + 프리셋) */}
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs flex-wrap sm:flex-nowrap">
+            <div className="flex items-center gap-1">
+              <Type className="w-3.5 h-3.5 text-slate-500 hidden sm:inline" />
+              <span className="font-bold text-slate-600 hidden md:inline">글자:</span>
+              <button
+                type="button"
+                onClick={() => handleUpdateFontScale(fontScale - 10)}
+                className="p-1 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-black shadow-2xs transition cursor-pointer flex items-center justify-center min-w-[24px]"
+                title="글자 크기 10% 축소 (작게)"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Real-time Smooth Slider */}
+              <input
+                type="range"
+                min={50}
+                max={350}
+                step={5}
+                value={fontScale}
+                onChange={(e) => handleUpdateFontScale(Number(e.target.value))}
+                className="w-16 sm:w-20 md:w-24 accent-slate-800 cursor-pointer h-1.5 bg-slate-300 rounded-lg"
+                title={`원하는 글자 크기 슬라이더 (${fontScale}%)`}
+              />
+
+              <button
+                type="button"
+                onClick={() => handleUpdateFontScale(fontScale + 10)}
+                className="p-1 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-black shadow-2xs transition cursor-pointer flex items-center justify-center min-w-[24px]"
+                title="글자 크기 10% 확대 (크게)"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Current Percentage & Preset Buttons */}
+            <div className="flex items-center gap-1">
+              <span className="px-1.5 py-0.5 rounded-md bg-slate-800 text-white font-mono font-black text-[11px] shadow-2xs min-w-[42px] text-center">
+                {fontScale}%
+              </span>
+
+              <div className="hidden lg:flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleUpdateFontScale(100)}
+                  className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
+                    fontScale === 100 ? 'bg-white text-slate-900 shadow-2xs font-black' : 'hover:bg-slate-200 text-slate-600'
+                  }`}
+                  title="표준 크기 (100%)"
+                >
+                  표준
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateFontScale(130)}
+                  className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
+                    fontScale === 130 ? 'bg-white text-slate-900 shadow-2xs font-black' : 'hover:bg-slate-200 text-slate-600'
+                  }`}
+                  title="크게 (130%)"
+                >
+                  크게
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateFontScale(180)}
+                  className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
+                    fontScale === 180 ? 'bg-white text-slate-900 shadow-2xs font-black' : 'hover:bg-slate-200 text-slate-600'
+                  }`}
+                  title="특대 (180%)"
+                >
+                  특대
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateFontScale(240)}
+                  className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
+                    fontScale === 240 ? 'bg-white text-slate-900 shadow-2xs font-black' : 'hover:bg-slate-200 text-slate-600'
+                  }`}
+                  title="초대형 (240%)"
+                >
+                  초대형
+                </button>
+              </div>
+
+              {/* Reset Button */}
+              {fontScale !== 130 && (
+                <button
+                  type="button"
+                  onClick={() => handleUpdateFontScale(130)}
+                  className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition cursor-pointer"
+                  title="기본 크기(130%)로 초기화"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -689,7 +820,10 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                         >
                           {/* Grade Badge with Tiny Integrated Hide Button */}
                           <div className="relative shrink-0 flex flex-col items-center">
-                            <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-slate-900 text-white font-black text-xs sm:text-sm md:text-base min-w-[54px] sm:min-w-[60px] text-center tracking-tight shadow-2xs">
+                            <span
+                              style={getRangeBadgeStyle()}
+                              className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-slate-900 text-white font-black text-center tracking-tight shadow-2xs transition-all"
+                            >
                               {item.levelLabel}
                             </span>
 
@@ -768,7 +902,8 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                             >
                               {/* STRICTLY NO TRUNCATE: Word-wrapped and 100% complete text */}
                               <p
-                                className={`${getRangeTextClass()} text-slate-950 tracking-tight leading-snug break-keep whitespace-normal group-hover:text-blue-700 transition`}
+                                style={getRangeTextStyle()}
+                                className="text-slate-950 tracking-tight leading-snug break-keep whitespace-normal group-hover:text-blue-700 transition-all"
                               >
                                 {item.rangeName || '(클릭하여 범위 입력)'}
                               </p>
@@ -839,95 +974,208 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
               })}
             </div>
 
-            {/* Source Section Toggle */}
-            <div className="flex items-center gap-1 text-xs">
-              <span className="text-slate-400 font-bold hidden sm:inline">출제 섹션:</span>
+            {/* Problem View Layout & Source Section Controls */}
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              {/* Problem Layout (그리드 vs 세로 펼침) */}
               <div className="flex items-center bg-slate-100 p-0.5 rounded-lg font-bold text-slate-700">
-                {activeSections.map((sec) => (
-                  <button
-                    key={sec.id}
-                    type="button"
-                    onClick={() => setProblemSectionId(sec.id)}
-                    className={`px-2 py-0.5 rounded-md transition cursor-pointer text-xs ${
-                      problemSectionId === sec.id
-                        ? 'bg-blue-600 text-white shadow-2xs font-black'
-                        : 'hover:bg-slate-200'
-                    }`}
-                  >
-                    {sec.name}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  onClick={() => setProblemLayout('grid')}
+                  className={`px-2 py-0.5 rounded-md transition cursor-pointer flex items-center gap-1 text-[11px] ${
+                    problemLayout === 'grid'
+                      ? 'bg-white text-slate-900 shadow-2xs font-black'
+                      : 'hover:bg-slate-200 text-slate-600'
+                  }`}
+                  title="3열 그리드로 나란히 배치"
+                >
+                  <Columns className="w-3 h-3" />
+                  <span>그리드</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProblemLayout('stacked')}
+                  className={`px-2 py-0.5 rounded-md transition cursor-pointer flex items-center gap-1 text-[11px] ${
+                    problemLayout === 'stacked'
+                      ? 'bg-white text-slate-900 shadow-2xs font-black'
+                      : 'hover:bg-slate-200 text-slate-600'
+                  }`}
+                  title="세로 펼침 와이드 보기"
+                >
+                  <Rows className="w-3 h-3" />
+                  <span>세로 펼침</span>
+                </button>
+              </div>
+
+              {/* Source Section Toggle */}
+              <div className="flex items-center gap-1">
+                <span className="text-slate-400 font-bold hidden sm:inline">출제:</span>
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg font-bold text-slate-700">
+                  {activeSections.map((sec) => (
+                    <button
+                      key={sec.id}
+                      type="button"
+                      onClick={() => setProblemSectionId(sec.id)}
+                      className={`px-2 py-0.5 rounded-md transition cursor-pointer text-xs ${
+                        problemSectionId === sec.id
+                          ? 'bg-slate-800 text-white shadow-2xs font-black'
+                          : 'hover:bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {sec.name}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Problem Cards Grid: Clean display with NO redundant range text */}
+          {/* Problem Cards Display: Supports Grid Mode (3 columns) and Stacked Mode (1 wide column) */}
           {problemItems.length > 0 ? (
-            <div className="grid gap-2.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-              {problemItems.map((item) => {
-                const probText = getProblemTextForRow(item, selectedProbNum);
-                const activeSecName =
-                  activeSections.find((s) => s.id === problemSectionId)?.name || '선택 섹션';
-                const words = probText
-                  ? probText
-                      .split(',')
-                      .map((w) => w.trim())
-                      .filter(Boolean)
-                  : [];
+            problemLayout === 'stacked' ? (
+              /* Stacked Vertical Mode */
+              <div className="space-y-3">
+                {problemItems.map((item) => {
+                  const probText = getProblemTextForRow(item, selectedProbNum);
+                  const activeSecName =
+                    activeSections.find((s) => s.id === problemSectionId)?.name || '선택 섹션';
+                  const words = probText
+                    ? probText
+                        .split(',')
+                        .map((w) => w.trim())
+                        .filter(Boolean)
+                    : [];
 
-                return (
-                  <div
-                    key={`prob-${selectedProbNum}-${item.id}`}
-                    className="relative group rounded-xl border border-slate-200/90 bg-slate-50/70 hover:bg-white hover:border-blue-300 transition p-2.5 sm:p-3 shadow-2xs flex items-center gap-2.5"
-                  >
-                    {/* Left: Prominent Level Badge */}
-                    <div className="relative shrink-0 flex flex-col items-center">
-                      <span className="inline-flex items-center justify-center px-3 py-1.5 rounded-xl bg-blue-700 text-white font-black text-sm sm:text-base md:text-lg min-w-[56px] sm:min-w-[62px] text-center tracking-tight shadow-2xs">
-                        {item.levelLabel}
-                      </span>
-                    </div>
-
-                    {/* Right: Large Problem Text (NO range text) */}
-                    <div className="flex-1 min-w-0 flex items-center justify-center bg-white py-2 px-2.5 rounded-lg border border-slate-200/80 shadow-2xs min-h-[48px]">
-                      {probText ? (
-                        words.length > 1 ? (
-                          <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 w-full">
-                            {words.map((word, wIdx) => (
-                              <span
-                                key={wIdx}
-                                className={`${getProblemTextClass()} text-slate-950 tracking-tight leading-tight`}
-                              >
-                                {word}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <p
-                            className={`${getProblemTextClass()} text-slate-950 leading-tight tracking-tight text-center break-words`}
-                          >
-                            {probText}
-                          </p>
-                        )
-                      ) : (
-                        <span className="text-xs font-bold text-slate-400">
-                          {item.rangeName ? `문제 미등록 (${item.rangeName})` : '문제 미설정'}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Focus Modal Button */}
-                    <button
-                      type="button"
-                      onClick={() => setFocusModalItem({ item, secName: activeSecName })}
-                      className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 rounded transition cursor-pointer shrink-0"
-                      title="이 급수만 칠판에 초대형으로 확대"
+                  return (
+                    <div
+                      key={`prob-stacked-${selectedProbNum}-${item.id}`}
+                      className="group rounded-2xl border border-slate-200 bg-slate-50/80 hover:bg-white hover:border-slate-300 transition p-3.5 sm:p-4 shadow-2xs flex items-center justify-between gap-4"
                     >
-                      <Maximize2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+                      {/* Left: Prominent Level Badge */}
+                      <div className="shrink-0 flex items-center gap-3">
+                        <span
+                          style={getProblemBadgeStyle()}
+                          className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-slate-800 text-white font-black text-center tracking-tight shadow-2xs transition-all"
+                        >
+                          {item.levelLabel}
+                        </span>
+                      </div>
+
+                      {/* Center: Extra Large Problem Text */}
+                      <div className="flex-1 min-w-0 flex items-center justify-center bg-white py-3 px-4 rounded-xl border border-slate-200/90 shadow-2xs min-h-[56px]">
+                        {probText ? (
+                          words.length > 1 ? (
+                            <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 w-full">
+                              {words.map((word, wIdx) => (
+                                <span
+                                  key={wIdx}
+                                  style={getProblemStackedTextStyle()}
+                                  className="font-black text-slate-950 tracking-tight leading-tight transition-all"
+                                >
+                                  {word}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p
+                              style={getProblemStackedTextStyle()}
+                              className="font-black text-slate-950 leading-tight tracking-tight text-center break-words transition-all"
+                            >
+                              {probText}
+                            </p>
+                          )
+                        ) : (
+                          <span className="text-xs sm:text-sm font-bold text-slate-400">
+                            {item.rangeName ? `문제 미등록 (${item.rangeName})` : '문제 미설정'}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Right: Blackboard Focus Button */}
+                      <button
+                        type="button"
+                        onClick={() => setFocusModalItem({ item, secName: activeSecName })}
+                        className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition cursor-pointer shrink-0"
+                        title="이 급수만 칠판에 초대형으로 확대"
+                      >
+                        <Maximize2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Standard 3-Column Grid Mode */
+              <div className="grid gap-2.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                {problemItems.map((item) => {
+                  const probText = getProblemTextForRow(item, selectedProbNum);
+                  const activeSecName =
+                    activeSections.find((s) => s.id === problemSectionId)?.name || '선택 섹션';
+                  const words = probText
+                    ? probText
+                        .split(',')
+                        .map((w) => w.trim())
+                        .filter(Boolean)
+                    : [];
+
+                  return (
+                    <div
+                      key={`prob-grid-${selectedProbNum}-${item.id}`}
+                      className="relative group rounded-xl border border-slate-200/90 bg-slate-50/70 hover:bg-white hover:border-slate-300 transition p-2.5 sm:p-3 shadow-2xs flex items-center gap-2.5"
+                    >
+                      {/* Left: Prominent Level Badge */}
+                      <div className="relative shrink-0 flex flex-col items-center">
+                        <span
+                          style={getProblemBadgeStyle()}
+                          className="inline-flex items-center justify-center px-3 py-1.5 rounded-xl bg-slate-800 text-white font-black text-center tracking-tight shadow-2xs transition-all"
+                        >
+                          {item.levelLabel}
+                        </span>
+                      </div>
+
+                      {/* Right: Large Problem Text (NO range text) */}
+                      <div className="flex-1 min-w-0 flex items-center justify-center bg-white py-2 px-2.5 rounded-lg border border-slate-200/80 shadow-2xs min-h-[48px]">
+                        {probText ? (
+                          words.length > 1 ? (
+                            <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 w-full">
+                              {words.map((word, wIdx) => (
+                                <span
+                                  key={wIdx}
+                                  style={getProblemGridTextStyle()}
+                                  className="text-slate-950 tracking-tight leading-tight transition-all font-black"
+                                >
+                                  {word}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p
+                              style={getProblemGridTextStyle()}
+                              className="text-slate-950 leading-tight tracking-tight text-center break-words transition-all font-black"
+                            >
+                              {probText}
+                            </p>
+                          )
+                        ) : (
+                          <span className="text-xs font-bold text-slate-400">
+                            {item.rangeName ? `문제 미등록 (${item.rangeName})` : '문제 미설정'}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Focus Modal Button */}
+                      <button
+                        type="button"
+                        onClick={() => setFocusModalItem({ item, secName: activeSecName })}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-slate-900 rounded transition cursor-pointer shrink-0"
+                        title="이 급수만 칠판에 초대형으로 확대"
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )
           ) : (
             <div className="text-center py-6 text-xs font-semibold text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
               출제 대상 섹션에 급수가 없습니다. 상단에서 급수를 추가해주세요.

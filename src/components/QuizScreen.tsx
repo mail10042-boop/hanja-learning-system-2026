@@ -125,7 +125,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({ state }) => {
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
                     questionCount === cnt
-                      ? 'bg-blue-600 text-white shadow-xs'
+                      ? 'bg-slate-800 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                   }`}
                 >
@@ -139,7 +139,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({ state }) => {
           <button
             type="button"
             onClick={() => handleGenerateQuiz(selectedLevel, questionCount)}
-            className="ml-auto px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-sm shadow-xs transition flex items-center gap-2 cursor-pointer active:scale-98"
+            className="ml-auto px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-black text-sm shadow-xs transition flex items-center gap-2 cursor-pointer active:scale-98"
           >
             <Shuffle className="w-4 h-4" />
             <span>무작위 다시 섞기</span>

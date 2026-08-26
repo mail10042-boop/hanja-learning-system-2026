@@ -100,6 +100,31 @@ function ensureSectionItems(sections: any[], levels: string[], sectionPlans: any
   });
 }
 
+function parseAndSanitizeState(parsed: any): AppState {
+  if (!parsed || typeof parsed !== 'object') return INITIAL_STATE;
+  const rawLevels = parsed.levels?.length ? parsed.levels : INITIAL_STATE.levels;
+  const sortedLevels = sortHanjaLevels(rawLevels);
+
+  const bank = parsed.bank && Object.keys(parsed.bank).length ? parsed.bank : INITIAL_STATE.bank;
+  const bankRangeOrder = parsed.bankRangeOrder && typeof parsed.bankRangeOrder === 'object' ? parsed.bankRangeOrder : (INITIAL_STATE.bankRangeOrder || {});
+  const normalizedLessonData = normalizeLessonData(parsed.lessonData, sortedLevels);
+  const quizPool = parsed.quizPool && Object.keys(parsed.quizPool).length > 0 ? { ...INITIAL_STATE.quizPool, ...parsed.quizPool } : INITIAL_STATE.quizPool;
+
+  const sections = ensureSectionItems(parsed.sections, sortedLevels, parsed.sectionPlans || INITIAL_STATE.sectionPlans);
+
+  return {
+    ...INITIAL_STATE,
+    ...parsed,
+    levels: sortedLevels,
+    sections,
+    bank,
+    bankRangeOrder,
+    quizPool,
+    lessonData: normalizedLessonData,
+    hiddenLevels: Array.isArray(parsed.hiddenLevels) ? parsed.hiddenLevels : [],
+  };
+}
+
 function loadSavedState(): AppState {
   try {
     for (const key of STORAGE_KEYS_TO_TRY) {
@@ -108,27 +133,7 @@ function loadSavedState(): AppState {
         try {
           const parsed = JSON.parse(raw);
           if (parsed && typeof parsed === 'object') {
-            const rawLevels = parsed.levels?.length ? parsed.levels : INITIAL_STATE.levels;
-            const sortedLevels = sortHanjaLevels(rawLevels);
-
-            const bank = parsed.bank && Object.keys(parsed.bank).length ? parsed.bank : INITIAL_STATE.bank;
-            const bankRangeOrder = parsed.bankRangeOrder && typeof parsed.bankRangeOrder === 'object' ? parsed.bankRangeOrder : (INITIAL_STATE.bankRangeOrder || {});
-            const normalizedLessonData = normalizeLessonData(parsed.lessonData, sortedLevels);
-            const quizPool = parsed.quizPool && Object.keys(parsed.quizPool).length > 0 ? { ...INITIAL_STATE.quizPool, ...parsed.quizPool } : INITIAL_STATE.quizPool;
-
-            const sections = ensureSectionItems(parsed.sections, sortedLevels, parsed.sectionPlans || INITIAL_STATE.sectionPlans);
-
-            return {
-              ...INITIAL_STATE,
-              ...parsed,
-              levels: sortedLevels,
-              sections,
-              bank,
-              bankRangeOrder,
-              quizPool,
-              lessonData: normalizedLessonData,
-              hiddenLevels: Array.isArray(parsed.hiddenLevels) ? parsed.hiddenLevels : [],
-            };
+            return parseAndSanitizeState(parsed);
           }
         } catch {
           // continue checking next key
@@ -143,14 +148,60 @@ function loadSavedState(): AppState {
 
 export default function App() {
   const [state, setState] = useState<AppState>(loadSavedState);
+  const [isCloudLoaded, setIsCloudLoaded] = useState<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('lesson');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [showFloatingTimer, setShowFloatingTimer] = useState<boolean>(true);
-  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('실시간 자동 저장 중');
+  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('클라우드 동기화 확인 중...');
 
-  // Automatic Real-time Auto-Save & Emergency Backup across multiple storage slots
+  // 1. Initial Cloud Sync: Load persistent state from server on app boot
   useEffect(() => {
+    let isMounted = true;
+    async function syncFromCloud() {
+      try {
+        const res = await fetch('/api/state');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.exists && data.state && isMounted) {
+            const sanitized = parseAndSanitizeState(data.state);
+            setState(sanitized);
+            setAutoSaveStatus('클라우드 동기화 완료 (모든 기기 연동)');
+            setIsCloudLoaded(true);
+            return;
+          } else if (data.success && !data.exists) {
+            // If server has no state file yet, seed server with existing client state
+            const currentLocal = loadSavedState();
+            await fetch('/api/state', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ state: currentLocal }),
+            });
+            if (isMounted) {
+              setAutoSaveStatus('클라우드 초기 동기화 완료');
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch state from server, using localStorage:', err);
+        if (isMounted) {
+          setAutoSaveStatus('로컬 데이터 사용 중 (오프라인)');
+        }
+      } finally {
+        if (isMounted) {
+          setIsCloudLoaded(true);
+        }
+      }
+    }
+    syncFromCloud();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // 2. Real-time LocalStorage Persistence and Debounced Cloud Auto-Sync
+  useEffect(() => {
+    // Immediate local storage backup
     try {
       const serialized = JSON.stringify(state);
       localStorage.setItem(PRIMARY_STORAGE_KEY, serialized);
@@ -158,15 +209,34 @@ export default function App() {
       localStorage.setItem('hanjaSystemData_v11', serialized);
       localStorage.setItem(BACKUP_KEY, serialized);
       localStorage.setItem(BACKUP_SNAPSHOT_KEY, serialized);
-      
-      const now = new Date();
-      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-      setAutoSaveStatus(`자동 저장됨 (${timeStr})`);
     } catch (err) {
       console.warn('Failed to persist to localStorage', err);
-      setAutoSaveStatus('저장 오류');
     }
-  }, [state]);
+
+    if (!isCloudLoaded) return;
+
+    setAutoSaveStatus('클라우드 동기화 중...');
+    const syncTimer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state }),
+        });
+        if (res.ok) {
+          const now = new Date();
+          const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+          setAutoSaveStatus(`클라우드 자동 저장됨 (${timeStr})`);
+        } else {
+          setAutoSaveStatus('로컬 저장 완료 (서버 대기)');
+        }
+      } catch {
+        setAutoSaveStatus('로컬 저장 완료 (오프라인 모드)');
+      }
+    }, 600);
+
+    return () => clearTimeout(syncTimer);
+  }, [state, isCloudLoaded]);
 
   // Window beforeunload listener for guaranteed synchronous persistence
   useEffect(() => {

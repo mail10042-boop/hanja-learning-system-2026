@@ -9,6 +9,7 @@ import {
   Volume2,
   VolumeX,
   Clock,
+  Cloud,
 } from 'lucide-react';
 import { ActiveTab } from '../types';
 
@@ -47,7 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Logo / Title */}
         <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm font-bold text-xl">
+            <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-white shadow-sm font-bold text-xl">
               漢
             </div>
             <div>
@@ -56,9 +57,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                   한자 학습 보조 관리 시스템
                 </h1>
                 {autoSaveStatus && (
-                  <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-700 font-bold text-[10px]" title={autoSaveStatus}>
+                  <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 font-bold text-[10px]" title="클라우드 실시간 동기화 작동 중: 다른 컴퓨터나 기기에서 접속해도 이전 작업 데이터가 즉시 유지됩니다.">
+                    <Cloud className="w-3 h-3 text-emerald-600" />
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span>자동저장 ON</span>
+                    <span>클라우드 자동저장 ON</span>
                   </span>
                 )}
               </div>
@@ -74,7 +76,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={onToggleFloatingTimer}
               className={`p-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 ${
-                showFloatingTimer ? 'bg-blue-600 text-white border-blue-700' : 'bg-slate-100 text-slate-600'
+                showFloatingTimer ? 'bg-slate-800 text-white border-slate-900' : 'bg-slate-100 text-slate-600'
               }`}
               title="이동식 시계 켜기/끄기"
             >
@@ -86,21 +88,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
               title="소리 설정"
             >
-              {soundEnabled ? <Volume2 className="w-4 h-4 text-blue-600" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+              {soundEnabled ? <Volume2 className="w-4 h-4 text-slate-800" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
             </button>
           </div>
         </div>
 
         {/* Navigation Tabs */}
-        <nav className="flex items-center gap-1.5 p-1 bg-slate-100/80 rounded-xl border border-slate-200/80 text-sm font-medium w-full md:w-auto justify-center">
+        <nav className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200 text-sm font-medium w-full md:w-auto justify-center">
           <button
             type="button"
             id="nav-btn-lesson"
             onClick={() => setActiveTab('lesson')}
             className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
               activeTab === 'lesson'
-                ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                ? 'bg-slate-800 text-white shadow-xs font-semibold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
             }`}
           >
             <BookOpen className="w-4 h-4" />
@@ -113,8 +115,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => setActiveTab('quiz')}
             className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
               activeTab === 'quiz'
-                ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                ? 'bg-slate-800 text-white shadow-xs font-semibold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
             }`}
           >
             <HelpCircle className="w-4 h-4" />
@@ -128,7 +130,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
               activeTab === 'admin'
                 ? 'bg-slate-800 text-white shadow-xs font-semibold'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
             }`}
           >
             <ShieldCheck className={`w-4 h-4 ${isAdminAuthenticated ? 'text-emerald-400' : ''}`} />
@@ -147,7 +149,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={onToggleFloatingTimer}
             className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs ${
               showFloatingTimer
-                ? 'border-blue-600 bg-blue-600 text-white'
+                ? 'border-slate-800 bg-slate-800 text-white'
                 : 'border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
             title="이동식 시계 켜기/끄기"
@@ -162,7 +164,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               id="btn-font-plus"
               onClick={onIncreaseFont}
-              className="p-1.5 rounded-lg bg-white shadow-2xs hover:bg-blue-50 text-slate-700 hover:text-blue-600 font-bold transition flex items-center gap-0.5"
+              className="p-1.5 rounded-lg bg-white shadow-2xs hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-bold transition flex items-center gap-0.5"
               title="글자 크기 키우기 (A+)"
             >
               <ZoomIn className="w-3.5 h-3.5" />
@@ -172,7 +174,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               id="btn-font-minus"
               onClick={onDecreaseFont}
-              className="p-1.5 rounded-lg bg-white shadow-2xs hover:bg-blue-50 text-slate-700 hover:text-blue-600 font-bold transition flex items-center gap-0.5"
+              className="p-1.5 rounded-lg bg-white shadow-2xs hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-bold transition flex items-center gap-0.5"
               title="글자 크기 줄이기 (A-)"
             >
               <ZoomOut className="w-3.5 h-3.5" />
@@ -193,12 +195,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={onToggleSound}
             className={`p-2 rounded-xl border text-xs flex items-center gap-1.5 transition ${
               soundEnabled
-                ? 'border-blue-200 bg-blue-50 text-blue-700 font-medium'
+                ? 'border-slate-300 bg-slate-100 text-slate-800 font-medium'
                 : 'border-slate-200 bg-slate-100 text-slate-400'
             }`}
             title={soundEnabled ? '효과음 켜짐' : '효과음 꺼짐'}
           >
-            {soundEnabled ? <Volume2 className="w-4 h-4 text-blue-600" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+            {soundEnabled ? <Volume2 className="w-4 h-4 text-slate-800" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
             <span className="hidden lg:inline">{soundEnabled ? '소리 ON' : '소리 OFF'}</span>
           </button>
         </div>

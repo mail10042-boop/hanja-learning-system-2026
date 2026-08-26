@@ -23,10 +23,9 @@ const ALARM_STORAGE_KEY = 'hanja_timer_alarm_sound';
 const TIMER_SIZE_STORAGE_KEY = 'hanja_timer_size_mode';
 
 const ALARM_SOUND_OPTIONS: { id: AlarmSoundType; label: string; icon: string; desc: string }[] = [
-  { id: 'bell', label: '자명종', icon: '⏰', desc: '따르릉~ 따르릉~' },
-  { id: 'bomb', label: '폭탄 소리', icon: '💣', desc: '휘익- 쾅!' },
-  { id: 'funny', label: '웃긴 소리', icon: '🤪', desc: '끝! 시간 끝났습니다~' },
-  { id: 'rooster', label: '닭 소리', icon: '🐓', desc: '꼬~끼~오~!' },
+  { id: 'bell', label: '자명종', icon: '⏰', desc: '따르릉~ 따르릉~ 따르릉~ (3회)' },
+  { id: 'bomb', label: '폭탄 소리', icon: '💣', desc: '휘익- 쾅! 쾅! 쾅! (3회)' },
+  { id: 'rooster', label: '닭 소리', icon: '🐓', desc: '꼬~끼~오~! (3회)' },
 ];
 
 export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) => {
@@ -40,7 +39,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
   const [alarmSound, setAlarmSound] = useState<AlarmSoundType>(() => {
     try {
       const saved = localStorage.getItem(ALARM_STORAGE_KEY) as AlarmSoundType;
-      if (['bell', 'bomb', 'funny', 'rooster'].includes(saved)) {
+      if (['bell', 'bomb', 'rooster'].includes(saved)) {
         return saved;
       }
     } catch {}
@@ -443,6 +442,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
 
             {/* Quick Preset Buttons for Classroom Speed */}
             <div className="space-y-1.5">
+              {/* Row 1: 10s, 30s, 1m, 1m 30s */}
               <div className="grid grid-cols-4 gap-1 text-xs">
                 <button
                   type="button"
@@ -467,15 +467,54 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
                 </button>
                 <button
                   type="button"
+                  onClick={() => setTimerExact(90)}
+                  className="py-1.5 rounded-lg bg-blue-900/60 hover:bg-blue-600 text-blue-200 hover:text-white font-bold transition text-center cursor-pointer active:scale-95 border border-blue-700/50"
+                  title="1분 30초 (90초) 설정"
+                >
+                  1분 30초
+                </button>
+              </div>
+
+              {/* Row 2: 3m, 5m, 10m, Custom */}
+              <div className="grid grid-cols-4 gap-1 text-xs">
+                <button
+                  type="button"
                   onClick={() => setTimerExact(180)}
                   className="py-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-200 font-bold transition text-center cursor-pointer active:scale-95"
                 >
                   3분
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setTimerExact(300)}
+                  className="py-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-200 font-bold transition text-center cursor-pointer active:scale-95"
+                >
+                  5분
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTimerExact(600)}
+                  className="py-1.5 rounded-lg bg-blue-900/60 hover:bg-blue-600 text-blue-200 hover:text-white font-bold transition text-center cursor-pointer active:scale-95 border border-blue-700/50"
+                  title="10분 (600초) 설정"
+                >
+                  10분
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDirectInputOpen(!isDirectInputOpen)}
+                  className={`py-1.5 rounded-lg font-bold transition text-center cursor-pointer active:scale-95 border ${
+                    isDirectInputOpen
+                      ? 'bg-blue-600 text-white border-blue-500'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                  }`}
+                  title="시간 직접 입력"
+                >
+                  직접입력
+                </button>
               </div>
 
               {/* Adjust +/- Seconds */}
-              <div className="grid grid-cols-4 gap-1 text-[11px]">
+              <div className="grid grid-cols-4 gap-1 text-[11px] pt-0.5">
                 <button
                   type="button"
                   onClick={() => adjustSec(-10)}
@@ -515,7 +554,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
                   <button
                     type="button"
                     onClick={() => setIsDirectInputOpen(false)}
-                    className="text-slate-400 hover:text-white"
+                    className="text-slate-400 hover:text-white cursor-pointer"
                   >
                     ✕ 닫기
                   </button>
@@ -550,22 +589,23 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
               </div>
             )}
 
-            {/* Expandable Settings: Alarm Sounds and 5min/10min */}
+            {/* Expandable Settings: 3 Alarm Sounds */}
             {isSettingsOpen && (
               <div className="pt-2 border-t border-slate-800 space-y-2 text-xs">
                 <div className="flex items-center justify-between font-bold text-slate-300 text-[11px]">
-                  <span>종료 알람 소리 선택</span>
+                  <span>종료 알람 소리 선택 (3회 울리고 멈춤)</span>
                   <button
                     type="button"
                     onClick={() => playMasterAlarm(alarmSound, true)}
                     className="text-blue-400 hover:text-blue-300 flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded cursor-pointer"
+                    title="선택한 소리 3회 재생 테스트"
                   >
                     <Volume2 className="w-3 h-3" />
                     <span>소리 테스트</span>
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-3 gap-1.5">
                   {ALARM_SOUND_OPTIONS.map((opt) => (
                     <button
                       key={opt.id}
@@ -574,35 +614,16 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
                         setAlarmSound(opt.id);
                         playMasterAlarm(opt.id, soundEnabled);
                       }}
-                      className={`py-1.5 px-2 rounded-lg font-bold transition flex items-center justify-between cursor-pointer active:scale-95 text-[11px] ${
+                      className={`py-2 px-1.5 rounded-lg font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer active:scale-95 text-[11px] border ${
                         alarmSound === opt.id
-                          ? 'bg-blue-600 text-white shadow-2xs'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                          ? 'bg-blue-600 text-white border-blue-400 shadow-2xs'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'
                       }`}
                     >
-                      <span className="flex items-center gap-1.5 truncate">
-                        <span>{opt.icon}</span>
-                        <span>{opt.label}</span>
-                      </span>
+                      <span className="text-base">{opt.icon}</span>
+                      <span className="font-extrabold truncate">{opt.label}</span>
                     </button>
                   ))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-1.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setTimerExact(300)}
-                    className="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px]"
-                  >
-                    5분 타이머
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTimerExact(600)}
-                    className="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px]"
-                  >
-                    10분 타이머
-                  </button>
                 </div>
               </div>
             )}

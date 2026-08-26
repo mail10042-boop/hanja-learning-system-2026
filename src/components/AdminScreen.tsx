@@ -32,6 +32,14 @@ import {
   ChevronsUp,
   ChevronsDown,
   Sliders,
+  GripVertical,
+  Move,
+  Cloud,
+  CloudUpload,
+  CloudDownload,
+  Copy,
+  Clipboard,
+  ClipboardCheck,
 } from 'lucide-react';
 import { AppState, RangeProblemData, SectionItem, SectionRowItem } from '../types';
 import { INITIAL_STATE } from '../data/initialData';
@@ -123,6 +131,19 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [prob2Text, setProb2Text] = useState<string>('');
   const [prob3Text, setProb3Text] = useState<string>('');
   const [prob4Text, setProb4Text] = useState<string>('');
+  const [draggedBankIndex, setDraggedBankIndex] = useState<number | null>(null);
+  const [dragOverBankIndex, setDragOverBankIndex] = useState<number | null>(null);
+
+  // Individual Bank Item Edit Modal State
+  const [editingBankItem, setEditingBankItem] = useState<{
+    level: string;
+    originalRangeName: string;
+    rangeName: string;
+    prob1: string;
+    prob2: string;
+    prob3: string;
+    prob4: string;
+  } | null>(null);
 
   // Toast feedback
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -136,6 +157,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     confirmVariant?: 'danger' | 'primary' | 'emerald';
     onConfirm: () => void;
   } | null>(null);
+
+  // Cross-browser Clipboard Backup Modal (Safari fallback & quick copy/paste)
+  const [isClipboardModalOpen, setIsClipboardModalOpen] = useState(false);
+  const [clipboardMode, setClipboardMode] = useState<'copy' | 'paste'>('copy');
+  const [clipboardJsonText, setClipboardJsonText] = useState('');
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setFeedbackMsg({ text, type });
@@ -748,6 +775,99 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     showToast(`[${activeBankLevel}] 문제은행에 [${trimmedRange}] 범위가 저장되었습니다.`);
   };
 
+  // Open modal to edit registered range and its individual problems
+  const handleStartEditBankItem = (lvl: string, rng: string) => {
+    const entry = state.bank[lvl]?.[rng];
+    setEditingBankItem({
+      level: lvl,
+      originalRangeName: rng,
+      rangeName: rng,
+      prob1: entry?.prob1 || '',
+      prob2: entry?.prob2 || '',
+      prob3: entry?.prob3 || '',
+      prob4: entry?.prob4 || '',
+    });
+  };
+
+  // Save changes from individual problem bank item edit modal
+  const handleSaveEditedBankItem = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!editingBankItem) return;
+
+    const { level, originalRangeName, rangeName, prob1, prob2, prob3, prob4 } = editingBankItem;
+    const trimmedRange = rangeName.trim();
+    if (!trimmedRange) {
+      showToast('학습 범위명을 입력해주세요 (예: 10과 250페이지).', 'error');
+      return;
+    }
+
+    if (!prob1.trim() && !prob2.trim() && !prob3.trim() && !prob4.trim()) {
+      showToast('최소 1개 이상의 문제 내용을 입력해주세요.', 'error');
+      return;
+    }
+
+    const updatedEntry: RangeProblemData = {
+      rangeName: trimmedRange,
+      prob1: prob1.trim(),
+      prob2: prob2.trim(),
+      prob3: prob3.trim(),
+      prob4: prob4.trim(),
+    };
+
+    onUpdateState((prev) => {
+      const prevLevelBank = { ...(prev.bank[level] || {}) };
+      const prevOrder = getOrderedBankRanges(prev.bank, prev.bankRangeOrder, level);
+
+      if (originalRangeName !== trimmedRange) {
+        // Range name was renamed
+        delete prevLevelBank[originalRangeName];
+        prevLevelBank[trimmedRange] = updatedEntry;
+
+        const nextOrder = prevOrder.map((r) => (r === originalRangeName ? trimmedRange : r));
+        if (!nextOrder.includes(trimmedRange)) {
+          nextOrder.push(trimmedRange);
+        }
+
+        // Also synchronize any curriculum rows in sections that were using this rangeName
+        const nextSections = (prev.sections || []).map((sec) => ({
+          ...sec,
+          items: (sec.items || []).map((item) => {
+            if (item.baseLevel === level && item.rangeName === originalRangeName) {
+              return { ...item, rangeName: trimmedRange };
+            }
+            return item;
+          }),
+        }));
+
+        return {
+          ...prev,
+          sections: nextSections,
+          bank: {
+            ...prev.bank,
+            [level]: prevLevelBank,
+          },
+          bankRangeOrder: {
+            ...(prev.bankRangeOrder || {}),
+            [level]: nextOrder,
+          },
+        };
+      } else {
+        // Range name remains same, only problem texts updated
+        prevLevelBank[trimmedRange] = updatedEntry;
+        return {
+          ...prev,
+          bank: {
+            ...prev.bank,
+            [level]: prevLevelBank,
+          },
+        };
+      }
+    });
+
+    setEditingBankItem(null);
+    showToast(`[${level}] [${trimmedRange}] 학습 범위 및 문제가 성공적으로 수정되었습니다.`);
+  };
+
   const handleDeleteBankRange = (lvl: string, rng: string) => {
     setConfirmDialog({
       title: '문제 범위 삭제',
@@ -819,6 +939,57 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     showToast(`[${targetItem}] 범위가 ${edge === 'top' ? '맨 위로' : '맨 아래로'} 이동되었습니다.`);
   };
 
+  // Move problem bank range directly to a specified 0-based target index
+  const handleMoveBankRangeToPosition = (lvl: string, fromIndex: number, targetIndex: number) => {
+    const currentOrdered = getOrderedBankRanges(state.bank, state.bankRangeOrder, lvl);
+    if (fromIndex === targetIndex || targetIndex < 0 || targetIndex >= currentOrdered.length) return;
+
+    const newOrder = [...currentOrdered];
+    const [movedItem] = newOrder.splice(fromIndex, 1);
+    newOrder.splice(targetIndex, 0, movedItem);
+
+    onUpdateState((prev) => ({
+      ...prev,
+      bankRangeOrder: {
+        ...(prev.bankRangeOrder || {}),
+        [lvl]: newOrder,
+      },
+    }));
+    showToast(`[${movedItem}] 범위가 #${targetIndex + 1}번 자리로 이동되었습니다.`);
+  };
+
+  // Drag and Drop handlers for Problem Bank ranges
+  const handleBankDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedBankIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleBankDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverBankIndex !== index) {
+      setDragOverBankIndex(index);
+    }
+  };
+
+  const handleBankDrop = (e: React.DragEvent, targetIndex: number, lvl: string) => {
+    e.preventDefault();
+    if (draggedBankIndex === null || draggedBankIndex === targetIndex) {
+      setDraggedBankIndex(null);
+      setDragOverBankIndex(null);
+      return;
+    }
+    handleMoveBankRangeToPosition(lvl, draggedBankIndex, targetIndex);
+    setDraggedBankIndex(null);
+    setDragOverBankIndex(null);
+  };
+
+  const handleBankDragEnd = () => {
+    setDraggedBankIndex(null);
+    setDragOverBankIndex(null);
+  };
+
   // Auto-sort problem bank ranges by page or name and save custom order
   const handleAutoSortBankRanges = (lvl: string, mode: 'page' | 'name') => {
     const currentRanges = state.bank[lvl] ? Object.keys(state.bank[lvl]) : [];
@@ -840,7 +1011,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   };
 
   // =========================================================================
-  // 4. BACKUP & SYSTEM RESET
+  // 4. BACKUP, CLOUD SYNC & SYSTEM RESET
   // =========================================================================
   const handleResetToDefault = () => {
     setConfirmDialog({
@@ -848,22 +1019,48 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       message: '모든 데이터를 초기 기본 교육과정으로 초기화하시겠습니까?\n\n(사용자가 수정한 진도 및 문제 데이터가 기본값으로 복원됩니다.)',
       confirmText: '초기화하기',
       confirmVariant: 'danger',
-      onConfirm: () => {
-        onUpdateState(() => ({ ...INITIAL_STATE, levels: sortHanjaLevels(INITIAL_STATE.levels) }));
+      onConfirm: async () => {
+        const resetState = { ...INITIAL_STATE, levels: sortHanjaLevels(INITIAL_STATE.levels) };
+        onUpdateState(() => resetState);
+        try {
+          await fetch('/api/state/reset', { method: 'POST' });
+        } catch (e) {
+          console.warn('Server reset notification failed', e);
+        }
         showToast('기본 데이터로 초기화되었습니다.');
       },
     });
   };
 
+  // Cross-browser Safari & iOS bulletproof JSON Export
   const handleExportJSON = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(state, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `hanja_backup_${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-    showToast('백업 파일이 다운로드되었습니다.');
+    try {
+      const jsonString = JSON.stringify(state, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = url;
+      downloadAnchor.download = `hanja_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      downloadAnchor.style.display = 'none';
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+
+      setTimeout(() => {
+        if (downloadAnchor.parentNode) {
+          downloadAnchor.parentNode.removeChild(downloadAnchor);
+        }
+        URL.revokeObjectURL(url);
+      }, 1500);
+
+      showToast('백업 파일이 정상적으로 다운로드되었습니다.');
+    } catch (err) {
+      console.error('File download error in browser:', err);
+      // Safari / iframe sandbox fallback: open text backup modal directly
+      setClipboardJsonText(JSON.stringify(state, null, 2));
+      setClipboardMode('copy');
+      setIsClipboardModalOpen(true);
+      showToast('브라우저 제한으로 백업 텍스트 복사 창을 열었습니다.', 'error');
+    }
   };
 
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -873,8 +1070,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       fileReader.onload = (event) => {
         try {
           const parsed = JSON.parse(event.target?.result as string);
-          if (parsed.bank || parsed.sections) {
-            onUpdateState(() => ({ ...parsed, levels: sortHanjaLevels(parsed.levels || INITIAL_STATE.levels) }));
+          if (parsed && (parsed.bank || parsed.sections || parsed.levels)) {
+            onUpdateState(() => ({ ...INITIAL_STATE, ...parsed, levels: sortHanjaLevels(parsed.levels || INITIAL_STATE.levels) }));
             showToast('데이터를 성공적으로 불러왔습니다.');
           } else {
             showToast('올바르지 않은 백업 파일 형식입니다.', 'error');
@@ -883,6 +1080,89 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           showToast('JSON 파일을 파싱하는 중 오류가 발생했습니다.', 'error');
         }
       };
+    }
+  };
+
+  const handleOpenClipboardExport = () => {
+    setClipboardJsonText(JSON.stringify(state, null, 2));
+    setClipboardMode('copy');
+    setIsClipboardModalOpen(true);
+  };
+
+  const handleOpenClipboardImport = () => {
+    setClipboardJsonText('');
+    setClipboardMode('paste');
+    setIsClipboardModalOpen(true);
+  };
+
+  const handleApplyClipboardImport = () => {
+    const trimmed = clipboardJsonText.trim();
+    if (!trimmed) {
+      showToast('백업 텍스트를 입력해주세요.', 'error');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && (parsed.bank || parsed.sections || parsed.levels)) {
+        onUpdateState(() => ({
+          ...INITIAL_STATE,
+          ...parsed,
+          levels: sortHanjaLevels(parsed.levels || INITIAL_STATE.levels),
+        }));
+        setIsClipboardModalOpen(false);
+        setClipboardJsonText('');
+        showToast('텍스트 백업 데이터가 성공적으로 적용되었습니다.');
+      } else {
+        showToast('올바르지 않은 한자 백업 데이터 형식입니다.', 'error');
+      }
+    } catch {
+      showToast('JSON 형식 오류: 유효한 백업 텍스트인지 확인해주세요.', 'error');
+    }
+  };
+
+  const handleForceCloudSave = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await fetch('/api/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state }),
+      });
+      if (res.ok) {
+        showToast('클라우드 서버에 영구 저장이 완료되었습니다! (다른 기기/브라우저에서도 즉시 연동)');
+      } else {
+        showToast('클라우드 저장 실패. 네트워크 상태를 확인하세요.', 'error');
+      }
+    } catch (err) {
+      showToast('서버 연결 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  const handleReloadFromCloud = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await fetch('/api/state');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.exists && data.state) {
+          onUpdateState(() => ({
+            ...INITIAL_STATE,
+            ...data.state,
+            levels: sortHanjaLevels(data.state.levels || INITIAL_STATE.levels),
+          }));
+          showToast('클라우드 서버의 최신 데이터를 성공적으로 불러왔습니다!');
+        } else {
+          showToast('클라우드 서버에 저장된 이전 데이터가 없습니다.', 'error');
+        }
+      } else {
+        showToast('클라우드 데이터 불러오기 실패.', 'error');
+      }
+    } catch (err) {
+      showToast('서버 연결 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setIsSyncingCloud(false);
     }
   };
 
@@ -962,24 +1242,61 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           <div>
             <h2 className="text-lg font-bold">관리자 제어판 (통합 진도 & 실시간 문제 출제 관리)</h2>
             <p className="text-xs text-slate-400">
-              섹션 A에 항목을 넣으면 <strong>B, C에도 동시 일괄 반영</strong>되며, <strong>실시간 문제 출제 한자 풀</strong>을 손쉽게 등록 및 관리할 수 있습니다.
+              섹션 A에 항목을 넣으면 <strong>B, C에도 동시 일괄 반영</strong>되며, <strong>클라우드 자동 동기화</strong>로 어떤 기기/PC에서 접속해도 이전 데이터가 자동으로 유지됩니다.
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {/* Force Cloud Sync Button */}
+          <button
+            type="button"
+            onClick={handleForceCloudSave}
+            disabled={isSyncingCloud}
+            className="flex items-center gap-1.5 bg-emerald-700/80 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg border border-emerald-500/50 shadow-xs transition cursor-pointer font-semibold disabled:opacity-50"
+            title="현재 데이터를 클라우드 서버에 즉시 영구 저장합니다. 다른 컴퓨터에서도 즉시 나타납니다."
+          >
+            <CloudUpload className="w-3.5 h-3.5 text-emerald-200" />
+            <span>{isSyncingCloud ? '저장 중...' : '클라우드 즉시 저장'}</span>
+          </button>
+
+          {/* Reload from Cloud */}
+          <button
+            type="button"
+            onClick={handleReloadFromCloud}
+            disabled={isSyncingCloud}
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer disabled:opacity-50"
+            title="서버에 저장된 최신 데이터를 불러옵니다."
+          >
+            <CloudDownload className="w-3.5 h-3.5 text-sky-400" />
+            <span>클라우드 불러오기</span>
+          </button>
+
+          {/* Safari & Cross-browser Download */}
           <button
             type="button"
             onClick={handleExportJSON}
             className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer"
+            title="사파리, 크롬 등 모든 브라우저에서 안전하게 파일로 다운로드합니다."
           >
             <Download className="w-3.5 h-3.5 text-blue-400" />
             <span>백업 다운로드</span>
           </button>
 
+          {/* Clipboard Backup Text (Copy/Paste modal) */}
+          <button
+            type="button"
+            onClick={handleOpenClipboardExport}
+            className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer"
+            title="파일 다운로드 없이 백업 텍스트를 바로 복사하거나 붙여넣어 복원합니다."
+          >
+            <Clipboard className="w-3.5 h-3.5 text-amber-400" />
+            <span>텍스트 백업/복원</span>
+          </button>
+
           <label className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer">
             <Upload className="w-3.5 h-3.5 text-emerald-400" />
-            <span>백업 불러오기</span>
+            <span>파일 불러오기</span>
             <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
           </label>
 
@@ -2033,7 +2350,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             </div>
 
             {bankRangesForActiveLevel.length > 0 ? (
-              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+              <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
                 {bankRangesForActiveLevel
                   .map((rng, originalIdx) => ({ rng, originalIdx }))
                   .filter(({ rng }) => {
@@ -2053,18 +2370,60 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   const entry = state.bank[activeBankLevel]?.[rng];
                   const isFirst = originalIdx === 0;
                   const isLast = originalIdx === bankRangesForActiveLevel.length - 1;
+                  const isDraggingThis = draggedBankIndex === originalIdx;
+                  const isDragOverThis = dragOverBankIndex === originalIdx && !isDraggingThis;
 
                   return (
                     <div
                       key={rng}
-                      className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition space-y-2 text-xs"
+                      draggable={true}
+                      onDragStart={(e) => handleBankDragStart(e, originalIdx)}
+                      onDragOver={(e) => handleBankDragOver(e, originalIdx)}
+                      onDrop={(e) => handleBankDrop(e, originalIdx, activeBankLevel)}
+                      onDragEnd={handleBankDragEnd}
+                      className={`p-3 rounded-xl border transition space-y-2 text-xs select-none ${
+                        isDraggingThis
+                          ? 'opacity-40 border-dashed border-blue-400 bg-blue-50/50'
+                          : isDragOverThis
+                          ? 'border-2 border-blue-500 bg-blue-50/60 shadow-md ring-2 ring-blue-200'
+                          : 'border-slate-200 bg-slate-50/80 hover:bg-white hover:border-slate-300 shadow-2xs'
+                      }`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {/* Drag Handle */}
+                          <div
+                            className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-700 p-0.5"
+                            title="마우스로 끌어서 원하는 순서 위치에 놓기"
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </div>
+
                           {/* Order index badge */}
-                          <span className="shrink-0 text-[10px] font-extrabold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-md font-mono">
+                          <span className="shrink-0 text-[10px] font-extrabold bg-slate-200 text-slate-800 px-1.5 py-0.5 rounded-md font-mono">
                             #{originalIdx + 1}
                           </span>
+
+                          {/* Move position dropdown */}
+                          <select
+                            aria-label="순번 이동"
+                            value={originalIdx}
+                            onChange={(e) =>
+                              handleMoveBankRangeToPosition(
+                                activeBankLevel,
+                                originalIdx,
+                                Number(e.target.value)
+                              )
+                            }
+                            className="text-[11px] font-bold bg-white border border-slate-200 rounded-lg px-1.5 py-0.5 text-slate-700 hover:border-slate-300 focus:outline-hidden cursor-pointer"
+                            title="원하는 순번 자리로 즉시 이동"
+                          >
+                            {bankRangesForActiveLevel.map((_, idx) => (
+                              <option key={idx} value={idx}>
+                                #{idx + 1}번 자리
+                              </option>
+                            ))}
+                          </select>
 
                           {/* Up / Down Reorder buttons */}
                           <div className="flex items-center gap-0.5 shrink-0 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
@@ -2117,22 +2476,40 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                           <span className="font-bold text-slate-800 text-sm truncate">📍 {rng}</span>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteBankRange(activeBankLevel, rng)}
-                          className="p-1 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer shrink-0"
-                          title="삭제"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditBankItem(activeBankLevel, rng)}
+                            className="px-2 py-1 rounded-lg text-slate-700 hover:text-blue-700 bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-200 text-xs font-bold flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                            title="학습범위 및 문제 개별 수정"
+                          >
+                            <Edit2 className="w-3.5 h-3.5 text-blue-600" />
+                            <span>수정</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteBankRange(activeBankLevel, rng)}
+                            className="p-1 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                            title="삭제"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
 
                       {entry && (
-                        <div className="space-y-1 text-slate-700 text-[11px] bg-white p-2.5 rounded-lg border border-slate-200">
-                          {entry.prob1 && <div><span className="font-bold text-blue-700">문제1:</span> {entry.prob1}</div>}
-                          {entry.prob2 && <div><span className="font-bold text-blue-700">문제2:</span> {entry.prob2}</div>}
-                          {entry.prob3 && <div><span className="font-bold text-blue-700">문제3:</span> {entry.prob3}</div>}
-                          {entry.prob4 && <div><span className="font-bold text-blue-700">문제4:</span> {entry.prob4}</div>}
+                        <div
+                          onClick={() => handleStartEditBankItem(activeBankLevel, rng)}
+                          className="space-y-1 text-slate-700 text-[11px] bg-white hover:bg-blue-50/40 p-2.5 rounded-lg border border-slate-200 hover:border-blue-200 transition cursor-pointer"
+                          title="클릭하여 학습범위 및 문제 개별 수정"
+                        >
+                          {entry.prob1 && <div><span className="font-bold text-slate-900">문제1:</span> {entry.prob1}</div>}
+                          {entry.prob2 && <div><span className="font-bold text-slate-900">문제2:</span> {entry.prob2}</div>}
+                          {entry.prob3 && <div><span className="font-bold text-slate-900">문제3:</span> {entry.prob3}</div>}
+                          {entry.prob4 && <div><span className="font-bold text-slate-900">문제4:</span> {entry.prob4}</div>}
+                          {(!entry.prob1 && !entry.prob2 && !entry.prob3 && !entry.prob4) && (
+                            <div className="text-slate-400 font-medium">등록된 문제가 없습니다. 클릭하여 문제를 입력하세요.</div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2144,6 +2521,114 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 등록된 문제은행이 없습니다.
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Problem Bank Item Modal */}
+      {editingBankItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-5 sm:p-6 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg bg-blue-700 text-white font-black text-xs shadow-2xs">
+                  {editingBankItem.level}
+                </span>
+                <h3 className="text-base font-black text-slate-900">문제은행 항목 개별 수정</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingBankItem(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                title="닫기"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedBankItem} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  학습 범위명 (페이지/과 기입 시 자동 정렬 및 진도표 동기화)
+                </label>
+                <input
+                  type="text"
+                  value={editingBankItem.rangeName}
+                  onChange={(e) => setEditingBankItem({ ...editingBankItem, rangeName: e.target.value })}
+                  placeholder="예: 10과 역사와 철학 (265p), 165페이지, 25쪽"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-blue-500 bg-slate-50/50"
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-2 pt-1 border-t border-slate-100">
+                <div className="font-bold text-slate-700 flex items-center justify-between">
+                  <span>확인 문제 내용 (1~4번 개별 수정)</span>
+                  <span className="text-[11px] text-blue-600 font-medium">※ 원하는 문제만 자유롭게 수정 가능</span>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-blue-700 mb-0.5">문제 1번</label>
+                  <input
+                    type="text"
+                    value={editingBankItem.prob1}
+                    onChange={(e) => setEditingBankItem({ ...editingBankItem, prob1: e.target.value })}
+                    placeholder="예: 날 일, 달 월, 불 화"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs sm:text-sm font-medium focus:ring-1 focus:ring-blue-500 bg-slate-50/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-blue-700 mb-0.5">문제 2번</label>
+                  <input
+                    type="text"
+                    value={editingBankItem.prob2}
+                    onChange={(e) => setEditingBankItem({ ...editingBankItem, prob2: e.target.value })}
+                    placeholder="예: 물 수, 나무 목, 쇠 금"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs sm:text-sm font-medium focus:ring-1 focus:ring-blue-500 bg-slate-50/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-blue-700 mb-0.5">문제 3번</label>
+                  <input
+                    type="text"
+                    value={editingBankItem.prob3}
+                    onChange={(e) => setEditingBankItem({ ...editingBankItem, prob3: e.target.value })}
+                    placeholder="예: 흙 토, 뫼 산, 내 천"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs sm:text-sm font-medium focus:ring-1 focus:ring-blue-500 bg-slate-50/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-blue-700 mb-0.5">문제 4번</label>
+                  <input
+                    type="text"
+                    value={editingBankItem.prob4}
+                    onChange={(e) => setEditingBankItem({ ...editingBankItem, prob4: e.target.value })}
+                    placeholder="예: 하늘 천, 땅 지, 사람 인"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs sm:text-sm font-medium focus:ring-1 focus:ring-blue-500 bg-slate-50/50"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingBankItem(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-xs transition flex items-center gap-1.5 cursor-pointer active:scale-98"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>수정 내용 저장</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -2231,6 +2716,122 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           title={rangePickerModal.title}
           subtitle={rangePickerModal.subtitle}
         />
+      )}
+
+      {/* Cross-browser Clipboard Backup Modal (Safari / iOS & Quick Copy-Paste) */}
+      {isClipboardModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-6 max-w-xl w-full shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
+                  <Clipboard className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {clipboardMode === 'copy' ? '백업 텍스트 복사 (사파리 / 모든 기기)' : '백업 텍스트 붙여넣어 복원'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {clipboardMode === 'copy'
+                      ? '파일 다운로드가 안 되는 브라우저에서도 원클릭으로 백업 데이터를 복사할 수 있습니다.'
+                      : '이전에 복사해둔 백업 JSON 텍스트를 붙여넣어 복원합니다.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsClipboardModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Mode Switch Tabs */}
+            <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => {
+                  setClipboardMode('copy');
+                  setClipboardJsonText(JSON.stringify(state, null, 2));
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                  clipboardMode === 'copy' ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>백업 텍스트 복사</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setClipboardMode('paste');
+                  setClipboardJsonText('');
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                  clipboardMode === 'paste' ? 'bg-white text-emerald-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>백업 텍스트로 복원</span>
+              </button>
+            </div>
+
+            <div>
+              <textarea
+                value={clipboardJsonText}
+                onChange={(e) => setClipboardJsonText(e.target.value)}
+                readOnly={clipboardMode === 'copy'}
+                placeholder={
+                  clipboardMode === 'copy'
+                    ? '백업 텍스트가 표시됩니다...'
+                    : '여기에 백업 JSON 텍스트를 붙여넣으세요 (Ctrl+V 또는 Cmd+V)...'
+                }
+                rows={8}
+                className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-mono text-xs text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-hidden selection:bg-amber-200"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+              <span className="text-[11px] text-slate-400">
+                {clipboardMode === 'copy'
+                  ? '위 텍스트는 현재의 모든 한자 진도, 문제은행, 출제 풀을 포함합니다.'
+                  : '복원 시 현재 데이터가 입력된 백업 데이터로 교체됩니다.'}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsClipboardModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  닫기
+                </button>
+                {clipboardMode === 'copy' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(clipboardJsonText);
+                      showToast('클립보드에 백업 데이터가 복사되었습니다!');
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 shadow-xs transition flex items-center gap-1.5 cursor-pointer active:scale-98"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>클립보드 복사하기</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleApplyClipboardImport}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-xs transition flex items-center gap-1.5 cursor-pointer active:scale-98"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>이 데이터로 복원하기</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
