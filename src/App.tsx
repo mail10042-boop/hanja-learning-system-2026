@@ -19,24 +19,33 @@ const STORAGE_KEYS_TO_TRY = [
 const BACKUP_KEY = 'hanjaSystemData_backup';
 const BACKUP_SNAPSHOT_KEY = 'hanjaSystemData_snapshot';
 
-// Helper to ensure section items have baseLevel
-function ensureSectionItems(sections: any[], sortedLevels: string[], defaultPlans: Record<string, string[]>) {
+// Helper to ensure section items have baseLevel and levelLabel
+function ensureSectionItems(sections: any[], sortedLevels: string[], defaultPlans?: Record<string, string[]>) {
+  const safeSortedLevels = sortedLevels.length > 0 ? sortedLevels : ['8급'];
   if (!sections || !Array.isArray(sections) || sections.length === 0) {
     return (INITIAL_STATE.sections || []).map((sec) => ({
       ...sec,
-      items: (sec.items || []).map((item: any, idx: number) => ({
-        ...item,
-        baseLevel: item.baseLevel || sortedLevels[idx % sortedLevels.length] || '기초',
-      })),
+      items: (sec.items || []).map((item: any, idx: number) => {
+        const fallbackLevel = safeSortedLevels[idx % safeSortedLevels.length] || '8급';
+        return {
+          ...item,
+          levelLabel: item?.levelLabel || item?.baseLevel || fallbackLevel,
+          baseLevel: item?.baseLevel || item?.levelLabel || fallbackLevel,
+        };
+      }),
     }));
   }
 
   return sections.map((sec) => {
     const rawItems = Array.isArray(sec.items) ? sec.items : [];
     const sanitizedItems = rawItems.map((item: any, idx: number) => {
-      const bLvl = item?.baseLevel || sortedLevels[idx % sortedLevels.length] || '기초';
+      const fallbackLevel = safeSortedLevels[idx % safeSortedLevels.length] || '8급';
+      const bLvl = item?.baseLevel || item?.levelLabel || fallbackLevel;
+      const lLabel = item?.levelLabel || item?.baseLevel || bLvl;
       return {
+        ...item,
         id: item?.id || `item_${Date.now()}_${idx}`,
+        levelLabel: lLabel,
         baseLevel: bLvl,
         rangeName: typeof item?.rangeName === 'string' ? item.rangeName : '',
       };

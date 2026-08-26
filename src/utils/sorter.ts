@@ -2,8 +2,8 @@
  * Extracts page or unit numbers from range string (e.g. "165p", "165페이지", "10쪽", "3과")
  * for automatic pedagogical order sorting.
  */
-export function extractPageOrNumber(str: string): number {
-  if (!str) return 999999;
+export function extractPageOrNumber(str?: string | null): number {
+  if (!str || typeof str !== 'string') return 999999;
 
   // 1. Explicit page indicators like "165p", "165페이지", "165쪽", "p.165", "p 165"
   const pMatch = str.match(/p(?:age)?\.?\s*(\d+)/i) || str.match(/(\d+)\s*(?:p|페이지|쪽)/i);
@@ -29,15 +29,17 @@ export function extractPageOrNumber(str: string): number {
 /**
  * Sorts range names in natural ascending order by page number and lesson unit.
  */
-export function sortRangesByPage(ranges: string[]): string[] {
-  return [...ranges].sort((a, b) => {
+export function sortRangesByPage(ranges?: (string | null | undefined)[] | null): string[] {
+  if (!ranges || !Array.isArray(ranges)) return [];
+  const safeList = ranges.filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
+  return [...safeList].sort((a, b) => {
     const numA = extractPageOrNumber(a);
     const numB = extractPageOrNumber(b);
 
     if (numA !== numB) {
       return numA - numB;
     }
-    return a.localeCompare(b, 'ko-KR', { numeric: true });
+    return (a || '').localeCompare(b || '', 'ko-KR', { numeric: true });
   });
 }
 
