@@ -296,6 +296,26 @@ export default function App() {
     document.documentElement.style.fontSize = `${state.fontSize}px`;
   }, [state.fontSize]);
 
+  const handleToggleLevelHide = (level: string) => {
+    setState((prev) => {
+      const currentHidden = Array.isArray(prev.hiddenLevels) ? prev.hiddenLevels : [];
+      const isHidden = currentHidden.includes(level);
+      return {
+        ...prev,
+        hiddenLevels: isHidden
+          ? currentHidden.filter((lvl) => lvl !== level)
+          : [...currentHidden, level],
+      };
+    });
+  };
+
+  const handleRestoreAllLevels = () => {
+    setState((prev) => ({
+      ...prev,
+      hiddenLevels: [],
+    }));
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col text-slate-800 antialiased selection:bg-blue-600 selection:text-white pb-16">
       {/* Top Navigation */}
@@ -309,7 +329,14 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 w-full max-w-[1750px] mx-auto px-2 sm:px-4 md:px-6 py-4 sm:py-6">
-        {activeTab === 'lesson' && <LessonScreen state={state} onUpdateState={setState} />}
+        {activeTab === 'lesson' && (
+          <LessonScreen
+            state={state}
+            onUpdateState={setState}
+            onToggleLevelHide={handleToggleLevelHide}
+            onRestoreAllLevels={handleRestoreAllLevels}
+          />
+        )}
         {activeTab === 'quiz' && <QuizScreen state={state} onUpdateState={setState} />}
         {activeTab === 'admin' && (
           <AdminScreen

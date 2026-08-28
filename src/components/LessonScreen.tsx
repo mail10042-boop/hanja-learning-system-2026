@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Eye,
   EyeOff,
   RefreshCw,
   BookOpen,
@@ -16,6 +17,8 @@ import {
   RotateCcw,
   Sliders,
   Type,
+  ListFilter,
+  CheckCheck,
 } from 'lucide-react';
 import { AppState, SectionItem, SectionRowItem } from '../types';
 import { INITIAL_STATE } from '../data/initialData';
@@ -26,8 +29,8 @@ import { getOrderedBankRanges } from '../utils/sorter';
 interface LessonScreenProps {
   state: AppState;
   onUpdateState: (updater: (prev: AppState) => AppState) => void;
-  onToggleLevelHide: (level: string) => void;
-  onRestoreAllLevels: () => void;
+  onToggleLevelHide?: (level: string) => void;
+  onRestoreAllLevels?: () => void;
 }
 
 const COMMON_PRESET_BUTTONS = [
@@ -67,6 +70,9 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   // Problem view arrangement: 'grid' (나란히 3열) vs 'stacked' (세로 펼침 1열 와이드)
   const [problemLayout, setProblemLayout] = useState<'grid' | 'stacked'>('grid');
   
+  // Level Visibility Manager Modal State
+  const [isLevelVisibilityModalOpen, setIsLevelVisibilityModalOpen] = useState<boolean>(false);
+
   // Custom font scale percentage (50% ~ 400%, arbitrary custom zoom)
   const [fontScale, setFontScale] = useState<number>(() => {
     try {
@@ -94,6 +100,39 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   const activeSections: SectionItem[] =
     state.sections && state.sections.length > 0 ? state.sections : INITIAL_STATE.sections;
 
+  // Safe Hidden levels list
+  const currentHiddenLevels: string[] = Array.isArray(state.hiddenLevels) ? state.hiddenLevels : [];
+
+  // Toggle hiding/showing a level
+  const handleToggleLevel = (level: string) => {
+    playBeep(state.soundEnabled, 600, 0.05);
+    if (onToggleLevelHide) {
+      onToggleLevelHide(level);
+    } else {
+      onUpdateState((prev) => {
+        const list = Array.isArray(prev.hiddenLevels) ? prev.hiddenLevels : [];
+        const isHidden = list.includes(level);
+        return {
+          ...prev,
+          hiddenLevels: isHidden ? list.filter((l) => l !== level) : [...list, level],
+        };
+      });
+    }
+  };
+
+  // Restore all hidden levels
+  const handleRestoreAll = () => {
+    playBeep(state.soundEnabled, 750, 0.08);
+    if (onRestoreAllLevels) {
+      onRestoreAllLevels();
+    } else {
+      onUpdateState((prev) => ({
+        ...prev,
+        hiddenLevels: [],
+      }));
+    }
+  };
+
   // Problem source section
   const [problemSectionId, setProblemSectionId] = useState<string>(
     activeSections.find((s) => s.role === 'today')?.id || activeSections[0]?.id || 'sec_1'
@@ -110,6 +149,27 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   // Add Item to Section popover or toggle
   const [openAddBoxSecId, setOpenAddBoxSecId] = useState<string | null>(null);
   const [customAddInput, setCustomAddInput] = useState<string>('');
+
+  // Collect all unique levels currently in sections + global levels
+  const allAvailableLevels = React.useMemo(() => {
+    const set = new Set<string>();
+    activeSections.forEach((sec) => {
+      (sec.items || []).forEach((item) => {
+        if (item?.levelLabel) set.add(item.levelLabel);
+      });
+    });
+    (state.levels || []).forEach((lvl) => {
+      if (lvl) set.add(lvl);
+    });
+    return Array.from(set);
+  }, [activeSections, state.levels]);
+
+  // Check if a level or item is hidden
+  const isItemHidden = (levelLabel: string): boolean => {
+    if (!levelLabel) return false;
+    const base = extractBaseLevel(levelLabel);
+    return currentHiddenLevels.includes(levelLabel) || currentHiddenLevels.includes(base);
+  };
 
   // Update range for a single item in a specific section
   const handleSaveItemRange = (secId: string, rowId: string, newRange: string) => {
@@ -384,9 +444,7 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   // Find target section for problem section
   const currentProblemSection = activeSections.find((s) => s.id === problemSectionId) || activeSections[0];
   const problemItems = (currentProblemSection?.items || []).filter(
-    (item) =>
-      !state.hiddenLevels.includes(item.levelLabel) &&
-      !state.hiddenLevels.includes(extractBaseLevel(item.levelLabel))
+    (item) => !isItemHidden(item.levelLabel)
   );
 
   return (
@@ -498,6 +556,30 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
               </button>
             </div>
           )}
+
+          {/* Level Visibility Manager Button */}
+          <button
+            type="button"
+            onClick={() => setIsLevelVisibilityModalOpen(true)}
+            className={`px-2.5 py-1 rounded-lg border font-bold flex items-center gap-1.5 transition cursor-pointer text-xs ${
+              currentHiddenLevels.length > 0
+                ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-2xs'
+                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+            }`}
+            title="수업 화면 급수 표시 / 숨김 설정 열기"
+          >
+            {currentHiddenLevels.length > 0 ? (
+              <>
+                <EyeOff className="w-3.5 h-3.5" />
+                <span>급수 숨김 ({currentHiddenLevels.length})</span>
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5 text-slate-500" />
+                <span>급수 표시/숨김</span>
+              </>
+            )}
+          </button>
 
           {/* Add Section Button */}
           <button
@@ -611,32 +693,45 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
       </div>
 
       {/* Hidden levels notice banner */}
-      {state.hiddenLevels.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-1.5 text-amber-800 font-medium flex-wrap">
-            <EyeOff className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-            <span className="font-bold">숨겨진 급수:</span>
-            {state.hiddenLevels.map((lvl) => (
-              <button
-                key={lvl}
-                type="button"
-                onClick={() => onToggleLevelHide(lvl)}
-                className="px-2 py-0.5 rounded bg-white border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 transition cursor-pointer flex items-center gap-1 text-[11px]"
-                title="클릭하여 다시 보이기"
-              >
-                <span>{lvl}</span>
-                <span className="text-amber-500 hover:text-amber-700">✕</span>
-              </button>
-            ))}
+      {currentHiddenLevels.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-amber-900 font-medium flex-wrap">
+            <div className="flex items-center gap-1 font-black text-amber-800">
+              <EyeOff className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>숨겨진 급수 ({currentHiddenLevels.length}개):</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              {currentHiddenLevels.map((lvl) => (
+                <button
+                  key={lvl}
+                  type="button"
+                  onClick={() => handleToggleLevel(lvl)}
+                  className="px-2 py-0.5 rounded-lg bg-white border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 transition cursor-pointer flex items-center gap-1.5 text-[11px] shadow-2xs"
+                  title="클릭하여 이 급수 다시 보이기"
+                >
+                  <span>{lvl}</span>
+                  <span className="text-amber-500 font-black hover:text-amber-800">✕</span>
+                </button>
+              ))}
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={onRestoreAllLevels}
-            className="text-[11px] font-bold text-amber-700 hover:text-amber-900 underline flex items-center gap-1 cursor-pointer"
-          >
-            <RefreshCw className="w-3 h-3" />
-            <span>전체 보이기</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsLevelVisibilityModalOpen(true)}
+              className="text-[11px] font-bold text-amber-800 hover:text-amber-950 px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 transition cursor-pointer"
+            >
+              급수 설정
+            </button>
+            <button
+              type="button"
+              onClick={handleRestoreAll}
+              className="text-[11px] font-black text-amber-900 bg-amber-200 hover:bg-amber-300 px-2.5 py-1 rounded-lg border border-amber-300 transition flex items-center gap-1 cursor-pointer shadow-2xs"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>모든 급수 다시 보이기</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -661,9 +756,7 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
             const isEditingThisTitle = editingSectionId === sec.id;
 
             const visibleItems = (sec.items || []).filter(
-              (item) =>
-                !state.hiddenLevels.includes(item.levelLabel) &&
-                !state.hiddenLevels.includes(extractBaseLevel(item.levelLabel))
+              (item) => !isItemHidden(item.levelLabel)
             );
 
             return (
@@ -830,7 +923,7 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                             {/* Small Hide Button at Badge Corner */}
                             <button
                               type="button"
-                              onClick={() => onToggleLevelHide(item.levelLabel)}
+                              onClick={() => handleToggleLevel(item.levelLabel)}
                               className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-slate-200 hover:bg-amber-500 hover:text-white text-slate-600 flex items-center justify-center text-[9px] font-bold shadow-2xs transition cursor-pointer opacity-70 group-hover:opacity-100"
                               title={`${item.levelLabel} 화면에서 숨기기`}
                             >
@@ -1090,15 +1183,25 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                         )}
                       </div>
 
-                      {/* Right: Blackboard Focus Button */}
-                      <button
-                        type="button"
-                        onClick={() => setFocusModalItem({ item, secName: activeSecName })}
-                        className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition cursor-pointer shrink-0"
-                        title="이 급수만 칠판에 초대형으로 확대"
-                      >
-                        <Maximize2 className="w-5 h-5" />
-                      </button>
+                      {/* Right: Actions (Hide & Blackboard Focus Buttons) */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleLevel(item.levelLabel)}
+                          className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition cursor-pointer"
+                          title={`${item.levelLabel} 화면에서 숨기기`}
+                        >
+                          <EyeOff className="w-5 h-5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFocusModalItem({ item, secName: activeSecName })}
+                          className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                          title="이 급수만 칠판에 초대형으로 확대"
+                        >
+                          <Maximize2 className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1162,15 +1265,25 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                         )}
                       </div>
 
-                      {/* Focus Modal Button */}
-                      <button
-                        type="button"
-                        onClick={() => setFocusModalItem({ item, secName: activeSecName })}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-slate-900 rounded transition cursor-pointer shrink-0"
-                        title="이 급수만 칠판에 초대형으로 확대"
-                      >
-                        <Maximize2 className="w-3.5 h-3.5" />
-                      </button>
+                      {/* Right Action Icons (Hide & Focus Modal Buttons) */}
+                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleLevel(item.levelLabel)}
+                          className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded transition cursor-pointer"
+                          title={`${item.levelLabel} 화면에서 숨기기`}
+                        >
+                          <EyeOff className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFocusModalItem({ item, secName: activeSecName })}
+                          className="p-1 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded transition cursor-pointer"
+                          title="이 급수만 칠판에 초대형으로 확대"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1306,6 +1419,121 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
                 className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
               >
                 다음 급수 ▶
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. LEVEL VISIBILITY MANAGER MODAL (급수 표시 / 숨김 전용 관리창) */}
+      {isLevelVisibilityModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-2xs">
+                  <ListFilter className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900">
+                    수업 화면 급수 표시 / 숨김 설정
+                  </h3>
+                  <p className="text-xs text-slate-500 font-bold">
+                    수업 진행 중 가리고 싶은 급수를 숨기거나 다시 켤 수 있습니다.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsLevelVisibilityModalOpen(false)}
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Summary & Quick Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200/80 p-2.5 rounded-xl text-xs">
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-slate-600">
+                  전체 <strong className="text-slate-900 font-black">{allAvailableLevels.length}</strong>개 급수 중
+                </span>
+                <span className="inline-flex items-center gap-1 font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                  <Eye className="w-3 h-3 text-blue-600" />
+                  <span>표시 {allAvailableLevels.filter((lvl) => !isItemHidden(lvl)).length}개</span>
+                </span>
+                <span className="inline-flex items-center gap-1 font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                  <EyeOff className="w-3 h-3 text-amber-600" />
+                  <span>숨김 {currentHiddenLevels.length}개</span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleRestoreAll}
+                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                >
+                  <CheckCheck className="w-3 h-3" />
+                  <span>모든 급수 다시 보이기</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive Level Selection Grid */}
+            <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+              <p className="text-xs font-bold text-slate-500">
+                급수 태그를 클릭하여 <span className="text-blue-700 font-black">표시</span> ↔ <span className="text-amber-700 font-black">숨김</span> 상태를 자유롭게 전환하세요:
+              </p>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {allAvailableLevels.map((lvl) => {
+                  const hidden = isItemHidden(lvl);
+                  return (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => handleToggleLevel(lvl)}
+                      className={`p-2 rounded-xl border text-xs font-black flex items-center justify-between gap-1.5 transition cursor-pointer shadow-2xs ${
+                        hidden
+                          ? 'bg-amber-50/90 border-amber-300 text-amber-900 hover:bg-amber-100'
+                          : 'bg-white border-blue-300 text-slate-900 hover:bg-blue-50/80 hover:border-blue-400'
+                      }`}
+                    >
+                      <span className="truncate">{lvl}</span>
+                      <span
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                          hidden ? 'bg-amber-200 text-amber-950' : 'bg-blue-100 text-blue-800'
+                        }`}
+                      >
+                        {hidden ? (
+                          <>
+                            <EyeOff className="w-2.5 h-2.5 text-amber-800" />
+                            <span>숨김</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-2.5 h-2.5 text-blue-700" />
+                            <span>표시</span>
+                          </>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Bottom Close Button */}
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsLevelVisibilityModalOpen(false)}
+                className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs transition cursor-pointer shadow-2xs"
+              >
+                완료
               </button>
             </div>
           </div>
