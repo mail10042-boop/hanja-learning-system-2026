@@ -3,6 +3,7 @@ import {
   Shuffle,
   Printer,
   Sparkles,
+  Clock,
 } from 'lucide-react';
 import { AppState } from '../types';
 import { playBeep } from '../utils/audio';
@@ -10,9 +11,17 @@ import { PrintSheetModal } from './PrintSheetModal';
 
 interface QuizScreenProps {
   state: AppState;
+  onUpdateState?: (updater: (prev: AppState) => AppState) => void;
+  showFloatingTimer?: boolean;
+  onToggleFloatingTimer?: () => void;
 }
 
-export const QuizScreen: React.FC<QuizScreenProps> = ({ state }) => {
+export const QuizScreen: React.FC<QuizScreenProps> = ({
+  state,
+  onUpdateState,
+  showFloatingTimer,
+  onToggleFloatingTimer,
+}) => {
   const [selectedLevel, setSelectedLevel] = useState<string>(state.levels[0] || '8급');
   const [questionCount, setQuestionCount] = useState<number>(20);
   const [generatedItems, setGeneratedItems] = useState<string[]>([]);
@@ -76,14 +85,32 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({ state }) => {
             </h2>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsPrintModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>시험지 인쇄 / PDF</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {onToggleFloatingTimer && (
+              <button
+                type="button"
+                onClick={onToggleFloatingTimer}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                  showFloatingTimer
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                }`}
+                title="이동식 시험 타이머 켜기/끄기"
+              >
+                <Clock className="w-3.5 h-3.5 text-blue-400" />
+                <span>타이머 {showFloatingTimer ? 'ON' : 'OFF'}</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsPrintModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>시험지 인쇄 / PDF</span>
+            </button>
+          </div>
         </div>
 
         {/* Options Row */}

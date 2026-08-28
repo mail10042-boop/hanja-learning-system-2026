@@ -12,11 +12,15 @@ import {
   Minimize2,
   Maximize2,
   Tv,
+  X,
+  Sparkles,
 } from 'lucide-react';
 import { AlarmSoundType, playAlarm, playBeep, playMasterAlarm } from '../utils/audio';
 
 interface FloatingTimerProps {
   soundEnabled: boolean;
+  onClose?: () => void;
+  initialSeconds?: number;
 }
 
 const ALARM_STORAGE_KEY = 'hanja_timer_alarm_sound';
@@ -28,10 +32,14 @@ const ALARM_SOUND_OPTIONS: { id: AlarmSoundType; label: string; icon: string; de
   { id: 'rooster', label: '닭 소리', icon: '🐓', desc: '꼬~끼~오~! (3회)' },
 ];
 
-export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) => {
-  // Timer State (starts at 0)
-  const [totalSeconds, setTotalSeconds] = useState<number>(0);
-  const [remaining, setRemaining] = useState<number>(0);
+export const FloatingTimer: React.FC<FloatingTimerProps> = ({
+  soundEnabled,
+  onClose,
+  initialSeconds = 60,
+}) => {
+  // Timer State (starts at initialSeconds, default 60s/1min)
+  const [totalSeconds, setTotalSeconds] = useState<number>(initialSeconds);
+  const [remaining, setRemaining] = useState<number>(initialSeconds);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [isAlarmActive, setIsAlarmActive] = useState<boolean>(false);
 
@@ -72,14 +80,26 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
 
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isDirectInputOpen, setIsDirectInputOpen] = useState<boolean>(false);
-  const [inputMin, setInputMin] = useState<number>(0);
-  const [inputSec, setInputSec] = useState<number>(0);
+  const [inputMin, setInputMin] = useState<number>(Math.floor(initialSeconds / 60));
+  const [inputSec, setInputSec] = useState<number>(initialSeconds % 60);
+
+  // Clamping helper
+  const clampPos = (x: number, y: number) => {
+    if (typeof window === 'undefined') return { x, y };
+    const width = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const height = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const rightMargin = sizeMode === 'large' ? 400 : sizeMode === 'medium' ? 340 : 250;
+    const safeX = Math.max(12, Math.min(width - rightMargin, x));
+    const safeY = Math.max(12, Math.min(height - 120, y));
+    return { x: safeX, y: safeY };
+  };
 
   // Position & Dragging (fixed coordinate)
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     if (typeof window !== 'undefined') {
-      const rightPadding = 290;
-      return { x: Math.max(16, window.innerWidth - rightPadding), y: 76 };
+      const rightPadding = 350;
+      const initX = Math.max(16, window.innerWidth - rightPadding);
+      return clampPos(initX, 76);
     }
     return { x: 100, y: 76 };
   });
@@ -91,6 +111,15 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
     initPosX: 0,
     initPosY: 0,
   });
+
+  // Window resize handler: keeps timer strictly on-screen
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition((prev) => clampPos(prev.x, prev.y));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [sizeMode]);
 
   // Countdown Interval
   useEffect(() => {
@@ -145,22 +174,18 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
       if (!isDragging) return;
       const dx = e.clientX - dragStartRef.current.startX;
       const dy = e.clientY - dragStartRef.current.startY;
-
-      const newX = Math.max(10, Math.min(window.innerWidth - 200, dragStartRef.current.initPosX + dx));
-      const newY = Math.max(10, Math.min(window.innerHeight - 80, dragStartRef.current.initPosY + dy));
-
-      setPosition({ x: newX, y: newY });
+      const targetX = dragStartRef.current.initPosX + dx;
+      const targetY = dragStartRef.current.initPosY + dy;
+      setPosition(clampPos(targetX, targetY));
     };
 
     const handleTouchMove = (e: TouchEvent) => {
       if (!isDragging || e.touches.length !== 1) return;
       const dx = e.touches[0].clientX - dragStartRef.current.startX;
       const dy = e.touches[0].clientY - dragStartRef.current.startY;
-
-      const newX = Math.max(10, Math.min(window.innerWidth - 200, dragStartRef.current.initPosX + dx));
-      const newY = Math.max(10, Math.min(window.innerHeight - 80, dragStartRef.current.initPosY + dy));
-
-      setPosition({ x: newX, y: newY });
+      const targetX = dragStartRef.current.initPosX + dx;
+      const targetY = dragStartRef.current.initPosY + dy;
+      setPosition(clampPos(targetX, targetY));
     };
 
     const handleMouseUp = () => {
@@ -180,12 +205,12 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleMouseUp);
     };
-  }, [isDragging]);
+  }, [isDragging, sizeMode]);
 
   const toggleRun = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (remaining <= 0) {
-      setTimerExact(10);
+      setTimerExact(60);
       setIsRunning(true);
       return;
     }
@@ -193,7 +218,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
     setIsRunning((prev) => !prev);
   };
 
-  // Reset strictly to 0 seconds
+  // Reset to zero or re-arm
   const handleResetToZero = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     playBeep(soundEnabled, 480, 0.06);
@@ -313,6 +338,20 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
             <Maximize2 className="w-3 h-3" />
             <span>확대</span>
           </span>
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className="p-1 rounded-full bg-slate-800 hover:bg-rose-900 text-slate-400 hover:text-white transition cursor-pointer"
+              title="타이머 닫기 (숨기기)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       ) : (
         /* 2. MEDIUM & LARGE STUDENT-VISIBLE CLASSROOM DISPLAY */
@@ -336,7 +375,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
               </span>
             </div>
 
-            {/* Size & Setting Buttons */}
+            {/* Size & Setting & Close Buttons */}
             <div className="flex items-center gap-1">
               {isAlarmActive && (
                 <span className="text-xs font-black text-rose-400 animate-pulse flex items-center gap-0.5 mr-1">
@@ -379,6 +418,21 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ soundEnabled }) =>
               >
                 {isSettingsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
+
+              {/* Close Button */}
+              {onClose && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClose();
+                  }}
+                  className="p-1 rounded bg-slate-700/80 hover:bg-rose-600 text-slate-300 hover:text-white transition cursor-pointer ml-0.5"
+                  title="타이머 닫기 (숨기기)"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
 

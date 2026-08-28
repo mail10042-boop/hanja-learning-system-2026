@@ -19,11 +19,12 @@ import {
   Type,
   ListFilter,
   CheckCheck,
+  Clock,
 } from 'lucide-react';
 import { AppState, SectionItem, SectionRowItem } from '../types';
 import { INITIAL_STATE } from '../data/initialData';
 import { playBeep } from '../utils/audio';
-import { extractBaseLevel } from '../utils/levelOrder';
+import { extractBaseLevel, sortHanjaLevels } from '../utils/levelOrder';
 import { getOrderedBankRanges } from '../utils/sorter';
 
 interface LessonScreenProps {
@@ -31,6 +32,8 @@ interface LessonScreenProps {
   onUpdateState: (updater: (prev: AppState) => AppState) => void;
   onToggleLevelHide?: (level: string) => void;
   onRestoreAllLevels?: () => void;
+  showFloatingTimer?: boolean;
+  onToggleFloatingTimer?: () => void;
 }
 
 const COMMON_PRESET_BUTTONS = [
@@ -56,6 +59,8 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   onUpdateState,
   onToggleLevelHide,
   onRestoreAllLevels,
+  showFloatingTimer,
+  onToggleFloatingTimer,
 }) => {
   // Active problem tab: 1, 2, 3, 4
   const [selectedProbNum, setSelectedProbNum] = useState<1 | 2 | 3 | 4>(1);
@@ -103,18 +108,21 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
   // Safe Hidden levels list
   const currentHiddenLevels: string[] = Array.isArray(state.hiddenLevels) ? state.hiddenLevels : [];
 
-  // Toggle hiding/showing a level
-  const handleToggleLevel = (level: string) => {
+  // Toggle hiding/showing a level (strictly independent per exact grade name)
+  const handleToggleLevel = (level?: string | null) => {
+    if (!level || typeof level !== 'string') return;
+    const trimmed = level.trim();
+    if (!trimmed) return;
     playBeep(state.soundEnabled, 600, 0.05);
     if (onToggleLevelHide) {
-      onToggleLevelHide(level);
+      onToggleLevelHide(trimmed);
     } else {
       onUpdateState((prev) => {
         const list = Array.isArray(prev.hiddenLevels) ? prev.hiddenLevels : [];
-        const isHidden = list.includes(level);
+        const isHidden = list.includes(trimmed);
         return {
           ...prev,
-          hiddenLevels: isHidden ? list.filter((l) => l !== level) : [...list, level],
+          hiddenLevels: isHidden ? list.filter((l) => l !== trimmed) : [...list, trimmed],
         };
       });
     }
@@ -161,14 +169,13 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
     (state.levels || []).forEach((lvl) => {
       if (lvl) set.add(lvl);
     });
-    return Array.from(set);
+    return sortHanjaLevels(Array.from(set));
   }, [activeSections, state.levels]);
 
-  // Check if a level or item is hidden
-  const isItemHidden = (levelLabel: string): boolean => {
-    if (!levelLabel) return false;
-    const base = extractBaseLevel(levelLabel);
-    return currentHiddenLevels.includes(levelLabel) || currentHiddenLevels.includes(base);
+  // Check if an exact level or item is hidden (Exact match: 준5급, 준5급 0, 준5급 1 independently)
+  const isItemHidden = (levelLabel?: string | null): boolean => {
+    if (!levelLabel || typeof levelLabel !== 'string') return false;
+    return currentHiddenLevels.includes(levelLabel.trim());
   };
 
   // Update range for a single item in a specific section
@@ -580,6 +587,23 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
               </>
             )}
           </button>
+
+          {/* Floating Timer Toggle Button */}
+          {onToggleFloatingTimer && (
+            <button
+              type="button"
+              onClick={onToggleFloatingTimer}
+              className={`px-2.5 py-1 rounded-lg border font-bold flex items-center gap-1.5 transition cursor-pointer text-xs ${
+                showFloatingTimer
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+              }`}
+              title="이동식 수업 타이머 켜기/끄기"
+            >
+              <Clock className="w-3.5 h-3.5 text-blue-400" />
+              <span>타이머 {showFloatingTimer ? 'ON' : 'OFF'}</span>
+            </button>
+          )}
 
           {/* Add Section Button */}
           <button

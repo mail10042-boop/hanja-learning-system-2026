@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Clock } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { LessonScreen } from './components/LessonScreen';
 import { QuizScreen } from './components/QuizScreen';
@@ -127,7 +128,38 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('lesson');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
-  const [showFloatingTimer, setShowFloatingTimer] = useState<boolean>(true);
+  const [showFloatingTimer, setShowFloatingTimer] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('hanja_show_floating_timer');
+      if (saved !== null) return saved === 'true';
+    } catch {}
+    return true;
+  });
+
+  const handleToggleFloatingTimer = () => {
+    setShowFloatingTimer((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('hanja_show_floating_timer', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleCloseFloatingTimer = () => {
+    setShowFloatingTimer(false);
+    try {
+      localStorage.setItem('hanja_show_floating_timer', 'false');
+    } catch {}
+  };
+
+  const handleOpenFloatingTimer = () => {
+    setShowFloatingTimer(true);
+    try {
+      localStorage.setItem('hanja_show_floating_timer', 'true');
+    } catch {}
+  };
+
   const [autoSaveStatus, setAutoSaveStatus] = useState<string>('클라우드 실시간 동기화 연결 중...');
 
   // Track unique client session ID so this device doesn't overwrite its own active typing updates
@@ -297,14 +329,17 @@ export default function App() {
   }, [state.fontSize]);
 
   const handleToggleLevelHide = (level: string) => {
+    if (!level || typeof level !== 'string') return;
+    const trimmed = level.trim();
+    if (!trimmed) return;
     setState((prev) => {
       const currentHidden = Array.isArray(prev.hiddenLevels) ? prev.hiddenLevels : [];
-      const isHidden = currentHidden.includes(level);
+      const isHidden = currentHidden.includes(trimmed);
       return {
         ...prev,
         hiddenLevels: isHidden
-          ? currentHidden.filter((lvl) => lvl !== level)
-          : [...currentHidden, level],
+          ? currentHidden.filter((lvl) => lvl !== trimmed)
+          : [...currentHidden, trimmed],
       };
     });
   };
@@ -322,8 +357,15 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        fontSize={state.fontSize}
+        onIncreaseFont={() => setState((prev) => ({ ...prev, fontSize: Math.min(28, prev.fontSize + 1) }))}
+        onDecreaseFont={() => setState((prev) => ({ ...prev, fontSize: Math.max(12, prev.fontSize - 1) }))}
+        onResetFont={() => setState((prev) => ({ ...prev, fontSize: 16 }))}
+        soundEnabled={state.soundEnabled}
+        onToggleSound={() => setState((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))}
         isAdminAuthenticated={isAdminAuthenticated}
-        setIsAdminAuthenticated={setIsAdminAuthenticated}
+        showFloatingTimer={showFloatingTimer}
+        onToggleFloatingTimer={handleToggleFloatingTimer}
         autoSaveStatus={autoSaveStatus}
       />
 
@@ -335,9 +377,18 @@ export default function App() {
             onUpdateState={setState}
             onToggleLevelHide={handleToggleLevelHide}
             onRestoreAllLevels={handleRestoreAllLevels}
+            showFloatingTimer={showFloatingTimer}
+            onToggleFloatingTimer={handleToggleFloatingTimer}
           />
         )}
-        {activeTab === 'quiz' && <QuizScreen state={state} onUpdateState={setState} />}
+        {activeTab === 'quiz' && (
+          <QuizScreen
+            state={state}
+            onUpdateState={setState}
+            showFloatingTimer={showFloatingTimer}
+            onToggleFloatingTimer={handleToggleFloatingTimer}
+          />
+        )}
         {activeTab === 'admin' && (
           <AdminScreen
             state={state}
@@ -351,9 +402,23 @@ export default function App() {
       {/* Global Floating Timer overlay */}
       {showFloatingTimer && (
         <FloatingTimer
-          durationMinutes={state.timerMinutes || 10}
-          onClose={() => setShowFloatingTimer(false)}
+          soundEnabled={state.soundEnabled}
+          onClose={handleCloseFloatingTimer}
         />
+      )}
+
+      {/* Floating Quick Action Button when timer is closed */}
+      {!showFloatingTimer && (
+        <button
+          type="button"
+          id="btn-reopen-floating-timer"
+          onClick={handleOpenFloatingTimer}
+          className="fixed bottom-6 right-6 z-40 px-4 py-2.5 rounded-full bg-slate-900/95 hover:bg-slate-900 text-white font-bold text-xs flex items-center gap-2 shadow-2xl border border-slate-700/80 hover:border-blue-400 backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer ring-2 ring-blue-500/20"
+          title="수업 타이머 열기"
+        >
+          <Clock className="w-4 h-4 text-blue-400" />
+          <span>⏱️ 타이머 열기</span>
+        </button>
       )}
     </div>
   );
