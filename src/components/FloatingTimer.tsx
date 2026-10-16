@@ -14,6 +14,9 @@ import {
   Tv,
   X,
   Sparkles,
+  ZoomIn,
+  ZoomOut,
+  Sliders,
 } from 'lucide-react';
 import { AlarmSoundType, playAlarm, playBeep, playMasterAlarm } from '../utils/audio';
 
@@ -25,6 +28,7 @@ interface FloatingTimerProps {
 
 const ALARM_STORAGE_KEY = 'hanja_timer_alarm_sound';
 const TIMER_SIZE_STORAGE_KEY = 'hanja_timer_size_mode';
+const TIMER_SCALE_STORAGE_KEY = 'hanja_timer_scale_pct';
 
 const ALARM_SOUND_OPTIONS: { id: AlarmSoundType; label: string; icon: string; desc: string }[] = [
   { id: 'bell', label: '자명종', icon: '⏰', desc: '따르릉~ 따르릉~ 따르릉~ (3회)' },
@@ -65,6 +69,27 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({
     return 'medium'; // Default to medium/readable size for students
   });
 
+  // Continuous Custom Scale Percent (70% ~ 220%)
+  const [timerScale, setTimerScale] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(TIMER_SCALE_STORAGE_KEY);
+      if (saved) {
+        const num = Number(saved);
+        if (!isNaN(num) && num >= 70 && num <= 220) return num;
+      }
+    } catch {}
+    return 100;
+  });
+
+  const handleUpdateScale = (newScale: number) => {
+    const clamped = Math.max(70, Math.min(220, Math.round(newScale)));
+    setTimerScale(clamped);
+    try {
+      localStorage.setItem(TIMER_SCALE_STORAGE_KEY, String(clamped));
+    } catch {}
+    setPosition((prev) => clampPos(prev.x, prev.y, clamped));
+  };
+
   // Save selected sound & size
   useEffect(() => {
     try {
@@ -84,22 +109,24 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({
   const [inputSec, setInputSec] = useState<number>(initialSeconds % 60);
 
   // Clamping helper
-  const clampPos = (x: number, y: number) => {
+  const clampPos = (x: number, y: number, currentScale = timerScale) => {
     if (typeof window === 'undefined') return { x, y };
-    const width = typeof window !== 'undefined' ? window.innerWidth : 1200;
-    const height = typeof window !== 'undefined' ? window.innerHeight : 800;
-    const rightMargin = sizeMode === 'large' ? 400 : sizeMode === 'medium' ? 340 : 250;
-    const safeX = Math.max(12, Math.min(width - rightMargin, x));
-    const safeY = Math.max(12, Math.min(height - 120, y));
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const ratio = currentScale / 100;
+    const rightMargin = (sizeMode === 'large' ? 400 : sizeMode === 'medium' ? 340 : 330) * ratio;
+    const bottomMargin = (sizeMode === 'mini' ? 70 : 440) * ratio;
+    const safeX = Math.max(10, Math.min(width - rightMargin - 10, x));
+    const safeY = Math.max(10, Math.min(height - bottomMargin - 10, y));
     return { x: safeX, y: safeY };
   };
 
   // Position & Dragging (fixed coordinate)
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     if (typeof window !== 'undefined') {
-      const rightPadding = 350;
+      const rightPadding = 360;
       const initX = Math.max(16, window.innerWidth - rightPadding);
-      return clampPos(initX, 76);
+      return clampPos(initX, 76, 100);
     }
     return { x: 100, y: 76 };
   });
@@ -119,7 +146,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [sizeMode]);
+  }, [sizeMode, timerScale]);
 
   // Countdown Interval
   useEffect(() => {
@@ -271,85 +298,106 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({
         left: `${position.x}px`,
         top: `${position.y}px`,
         zIndex: 9999,
+        transform: `scale(${timerScale / 100})`,
+        transformOrigin: 'top left',
       }}
-      className={`select-none transition-all ${
+      className={`select-none transition-transform duration-75 ${
         isAlarmActive
           ? 'animate-bounce ring-4 ring-rose-500 shadow-2xl rounded-2xl'
           : 'shadow-2xl'
       }`}
     >
-      {/* 1. MINI COMPACT CHIP MODE */}
+      {/* 1. MINI COMPACT CHIP MODE (축소 모드: 시계 숫자를 훨씬 더 크고 뚜렷하게 표시 + 크기 조절 기능) */}
       {sizeMode === 'mini' ? (
         <div
-          onClick={() => {
-            if (!isDragging) {
-              setSizeMode('medium');
-            }
-          }}
-          className="bg-slate-900/95 hover:bg-slate-900 backdrop-blur-md border border-slate-700 hover:border-blue-400 text-white rounded-full shadow-2xl px-3.5 py-2 flex items-center gap-2.5 cursor-pointer transition ring-2 ring-blue-500/20 hover:ring-blue-500/50 group"
-          title="클릭하면 큰 타이머로 확대됩니다"
+          className="bg-slate-900/95 hover:bg-slate-900 backdrop-blur-md border border-slate-700/80 hover:border-blue-400 text-white rounded-2xl shadow-2xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3 transition-all ring-2 ring-blue-500/20 hover:ring-blue-500/40"
+          style={{ minWidth: '320px' }}
         >
+          {/* Drag Handle with Clock icon */}
           <div
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              handleMouseDown(e);
-            }}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              handleTouchStart(e);
-            }}
-            className="flex items-center gap-1 cursor-move text-slate-400 group-hover:text-slate-200"
+            onMouseDown={handleMouseDown}
+            onTouchStart={handleTouchStart}
+            className="flex items-center gap-1 cursor-move text-slate-400 hover:text-slate-200 select-none px-1 py-1 rounded hover:bg-slate-800"
+            title="드래그하여 원하는 위치로 이동"
           >
-            <GripHorizontal className="w-3.5 h-3.5" />
+            <GripHorizontal className="w-4 h-4" />
             <Clock className="w-4 h-4 text-blue-400" />
           </div>
 
-          <span className="font-mono text-lg font-black text-emerald-400 tracking-wider">
+          {/* Big High-Visibility Digital Readout: 축소했을 때도 숫자가 훨씬 더 크고 시원하게 보이도록 */}
+          <div
+            onClick={toggleRun}
+            className="font-mono text-3xl sm:text-4xl font-black text-emerald-400 tracking-wider leading-none drop-shadow-[0_0_12px_rgba(52,211,153,0.5)] cursor-pointer hover:text-emerald-300 transition px-1 py-0.5"
+            title="클릭하여 시작 / 일시정지"
+          >
             {formatTime(remaining)}
-          </span>
+          </div>
 
+          {/* Run/Pause Button */}
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleRun(e);
-            }}
-            className={`p-1.5 rounded-full text-white font-bold transition cursor-pointer active:scale-90 ${
-              isRunning ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'
+            onClick={toggleRun}
+            className={`p-2 rounded-xl text-slate-950 font-black transition cursor-pointer active:scale-90 shadow-xs ${
+              isRunning ? 'bg-amber-400 hover:bg-amber-300' : 'bg-emerald-400 hover:bg-emerald-300'
             }`}
             title={isRunning ? '일시정지' : '시작'}
           >
-            {isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            {isRunning ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
           </button>
 
+          {/* Reset Button */}
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleResetToZero(e);
-            }}
-            className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer active:scale-90"
-            title="0초 리셋"
+            onClick={handleResetToZero}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer active:scale-90"
+            title="0초 초기화"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <RotateCcw className="w-4 h-4" />
           </button>
 
-          <span className="text-xs font-bold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800/60 flex items-center gap-0.5">
-            <Maximize2 className="w-3 h-3" />
-            <span>확대</span>
-          </span>
+          {/* Direct Size Scale Adjustment on Mini Mode: [-] [+] and Percent */}
+          <div className="flex items-center gap-0.5 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700">
+            <button
+              type="button"
+              onClick={() => handleUpdateScale(timerScale - 10)}
+              className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-700 transition cursor-pointer"
+              title="시계 10% 축소 (작게)"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-[11px] font-mono font-bold text-slate-200 px-1 min-w-[34px] text-center">
+              {timerScale}%
+            </span>
+            <button
+              type="button"
+              onClick={() => handleUpdateScale(timerScale + 10)}
+              className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-700 transition cursor-pointer"
+              title="시계 10% 확대 (크게)"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
+          {/* Expand to Standard/Full view */}
+          <button
+            type="button"
+            onClick={() => setSizeMode('medium')}
+            className="px-2 py-1.5 rounded-xl bg-blue-900/60 hover:bg-blue-600 text-blue-200 hover:text-white border border-blue-700/60 transition cursor-pointer flex items-center gap-1 text-xs font-bold"
+            title="상세 설정 및 프리셋 타이머 열기"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+            <span>펼치기</span>
+          </button>
+
+          {/* Close */}
           {onClose && (
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-              className="p-1 rounded-full bg-slate-800 hover:bg-rose-900 text-slate-400 hover:text-white transition cursor-pointer"
-              title="타이머 닫기 (숨기기)"
+              onClick={onClose}
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-rose-900 text-slate-400 hover:text-white transition cursor-pointer"
+              title="타이머 닫기"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -384,6 +432,29 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({
                 </span>
               )}
 
+              {/* Direct Size Zoom Scale [-] [+] */}
+              <div className="flex items-center gap-0.5 bg-slate-800 p-0.5 rounded-lg border border-slate-700 text-xs">
+                <button
+                  type="button"
+                  onClick={() => handleUpdateScale(timerScale - 10)}
+                  className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-700 transition cursor-pointer"
+                  title="크기 10% 축소"
+                >
+                  <ZoomOut className="w-3 h-3" />
+                </button>
+                <span className="text-[10px] font-mono font-bold text-slate-200 px-1 min-w-[32px] text-center">
+                  {timerScale}%
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateScale(timerScale + 10)}
+                  className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-700 transition cursor-pointer"
+                  title="크기 10% 확대"
+                >
+                  <ZoomIn className="w-3 h-3" />
+                </button>
+              </div>
+
               {/* Toggle Large vs Medium */}
               <button
                 type="button"
@@ -393,7 +464,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({
                     ? 'bg-blue-600 text-white shadow-2xs'
                     : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
                 }`}
-                title={sizeMode === 'large' ? '기본 크기로 축소' : '학생들이 잘 보이게 초대형으로 확대'}
+                title={sizeMode === 'large' ? '기본 크기로 변경' : '학생들이 잘 보이게 초대형으로 변경'}
               >
                 <Tv className="w-3 h-3" />
                 <span>{sizeMode === 'large' ? '표준' : '대형'}</span>
@@ -403,18 +474,23 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({
               <button
                 type="button"
                 onClick={() => setSizeMode('mini')}
-                className="p-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white cursor-pointer"
-                title="작게 접기"
+                className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white cursor-pointer text-[11px] font-bold flex items-center gap-1"
+                title="시계만 보이게 작게 축소"
               >
-                <Minimize2 className="w-3.5 h-3.5" />
+                <Minimize2 className="w-3 h-3" />
+                <span>축소</span>
               </button>
 
               {/* Settings Toggle */}
               <button
                 type="button"
                 onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition cursor-pointer"
-                title="설정 및 알람 소리 선택"
+                className={`p-1 rounded transition cursor-pointer ${
+                  isSettingsOpen
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-700'
+                }`}
+                title="설정 및 크기 세부 조절"
               >
                 {isSettingsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
@@ -643,41 +719,101 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({
               </div>
             )}
 
-            {/* Expandable Settings: 3 Alarm Sounds */}
+            {/* Expandable Settings: Size Adjustment & Alarm Sound */}
             {isSettingsOpen && (
-              <div className="pt-2 border-t border-slate-800 space-y-2 text-xs">
-                <div className="flex items-center justify-between font-bold text-slate-300 text-[11px]">
-                  <span>종료 알람 소리 선택 (3회 울리고 멈춤)</span>
-                  <button
-                    type="button"
-                    onClick={() => playMasterAlarm(alarmSound, true)}
-                    className="text-blue-400 hover:text-blue-300 flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded cursor-pointer"
-                    title="선택한 소리 3회 재생 테스트"
-                  >
-                    <Volume2 className="w-3 h-3" />
-                    <span>소리 테스트</span>
-                  </button>
+              <div className="pt-2.5 border-t border-slate-800 space-y-3 text-xs">
+                {/* 1. Size Scale Controller (크기 자유 조절) */}
+                <div className="space-y-1.5 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between font-bold text-slate-300 text-[11px]">
+                    <span className="flex items-center gap-1.5 text-blue-400">
+                      <Sliders className="w-3.5 h-3.5" />
+                      <span>시계 크기 세부 조절 ({timerScale}%)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateScale(100)}
+                      className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                    >
+                      기본(100%) 초기화
+                    </button>
+                  </div>
+
+                  {/* Preset Scale Buttons */}
+                  <div className="grid grid-cols-5 gap-1 pt-1">
+                    {[
+                      { scale: 80, label: '80% 작게' },
+                      { scale: 100, label: '100% 보통' },
+                      { scale: 125, label: '125% 크게' },
+                      { scale: 150, label: '150% 대형' },
+                      { scale: 180, label: '180% 특대' },
+                    ].map((item) => (
+                      <button
+                        key={item.scale}
+                        type="button"
+                        onClick={() => handleUpdateScale(item.scale)}
+                        className={`py-1 rounded text-[10px] font-bold transition cursor-pointer border ${
+                          timerScale === item.scale
+                            ? 'bg-blue-600 text-white border-blue-400 shadow-2xs'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Smooth Slider */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <ZoomOut className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <input
+                      type="range"
+                      min={70}
+                      max={220}
+                      step={5}
+                      value={timerScale}
+                      onChange={(e) => handleUpdateScale(Number(e.target.value))}
+                      className="w-full accent-blue-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                      title={`원하는 시계 크기 슬라이더 (${timerScale}%)`}
+                    />
+                    <ZoomIn className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5">
-                  {ALARM_SOUND_OPTIONS.map((opt) => (
+                {/* 2. Alarm Sound Options */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between font-bold text-slate-300 text-[11px]">
+                    <span>종료 알람 소리 선택 (3회 울리고 멈춤)</span>
                     <button
-                      key={opt.id}
                       type="button"
-                      onClick={() => {
-                        setAlarmSound(opt.id);
-                        playMasterAlarm(opt.id, soundEnabled);
-                      }}
-                      className={`py-2 px-1.5 rounded-lg font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer active:scale-95 text-[11px] border ${
-                        alarmSound === opt.id
-                          ? 'bg-blue-600 text-white border-blue-400 shadow-2xs'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'
-                      }`}
+                      onClick={() => playMasterAlarm(alarmSound, true)}
+                      className="text-blue-400 hover:text-blue-300 flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded cursor-pointer"
+                      title="선택한 소리 3회 재생 테스트"
                     >
-                      <span className="text-base">{opt.icon}</span>
-                      <span className="font-extrabold truncate">{opt.label}</span>
+                      <Volume2 className="w-3 h-3" />
+                      <span>소리 테스트</span>
                     </button>
-                  ))}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {ALARM_SOUND_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setAlarmSound(opt.id);
+                          playMasterAlarm(opt.id, soundEnabled);
+                        }}
+                        className={`py-2 px-1.5 rounded-lg font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer active:scale-95 text-[11px] border ${
+                          alarmSound === opt.id
+                            ? 'bg-blue-600 text-white border-blue-400 shadow-2xs'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'
+                        }`}
+                      >
+                        <span className="text-base">{opt.icon}</span>
+                        <span className="font-extrabold truncate">{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

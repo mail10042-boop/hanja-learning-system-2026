@@ -751,8 +751,30 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         ? currentOrder
         : [...currentOrder, trimmedRange];
 
+      // Synchronize curriculum rows across all sections if they use this range
+      const nextSections = (prev.sections || []).map((sec) => ({
+        ...sec,
+        items: (sec.items || []).map((item) => {
+          const itemBase = item.baseLevel || extractBaseLevel(item.levelLabel);
+          const isLvlMatch = itemBase === activeBankLevel || item.levelLabel === activeBankLevel;
+          if (isLvlMatch && item.rangeName === trimmedRange) {
+            return {
+              ...item,
+              rangeName: trimmedRange,
+              baseLevel: activeBankLevel,
+              customProb1: rangeEntry.prob1,
+              customProb2: rangeEntry.prob2,
+              customProb3: rangeEntry.prob3,
+              customProb4: rangeEntry.prob4,
+            };
+          }
+          return item;
+        }),
+      }));
+
       return {
         ...prev,
+        sections: nextSections,
         bank: {
           ...prev.bank,
           [activeBankLevel]: {
@@ -772,7 +794,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     setProb2Text('');
     setProb3Text('');
     setProb4Text('');
-    showToast(`[${activeBankLevel}] 문제은행에 [${trimmedRange}] 범위가 저장되었습니다.`);
+    showToast(`[${activeBankLevel}] 문제은행에 [${trimmedRange}] 범위 및 문제가 성공적으로 저장되었습니다.`);
   };
 
   // Open modal to edit registered range and its individual problems
@@ -818,54 +840,60 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       const prevLevelBank = { ...(prev.bank[level] || {}) };
       const prevOrder = getOrderedBankRanges(prev.bank, prev.bankRangeOrder, level);
 
+      // 1. Update bank records
       if (originalRangeName !== trimmedRange) {
-        // Range name was renamed
         delete prevLevelBank[originalRangeName];
-        prevLevelBank[trimmedRange] = updatedEntry;
+      }
+      prevLevelBank[trimmedRange] = updatedEntry;
 
-        const nextOrder = prevOrder.map((r) => (r === originalRangeName ? trimmedRange : r));
+      // 2. Update order if renamed
+      let nextOrder = prevOrder;
+      if (originalRangeName !== trimmedRange) {
+        nextOrder = prevOrder.map((r) => (r === originalRangeName ? trimmedRange : r));
         if (!nextOrder.includes(trimmedRange)) {
           nextOrder.push(trimmedRange);
         }
-
-        // Also synchronize any curriculum rows in sections that were using this rangeName
-        const nextSections = (prev.sections || []).map((sec) => ({
-          ...sec,
-          items: (sec.items || []).map((item) => {
-            if (item.baseLevel === level && item.rangeName === originalRangeName) {
-              return { ...item, rangeName: trimmedRange };
-            }
-            return item;
-          }),
-        }));
-
-        return {
-          ...prev,
-          sections: nextSections,
-          bank: {
-            ...prev.bank,
-            [level]: prevLevelBank,
-          },
-          bankRangeOrder: {
-            ...(prev.bankRangeOrder || {}),
-            [level]: nextOrder,
-          },
-        };
-      } else {
-        // Range name remains same, only problem texts updated
-        prevLevelBank[trimmedRange] = updatedEntry;
-        return {
-          ...prev,
-          bank: {
-            ...prev.bank,
-            [level]: prevLevelBank,
-          },
-        };
       }
+
+      // 3. Immediately synchronize all curriculum rows across sections (A, B, C...)
+      const nextSections = (prev.sections || []).map((sec) => ({
+        ...sec,
+        items: (sec.items || []).map((item) => {
+          const itemBase = item.baseLevel || extractBaseLevel(item.levelLabel);
+          const isLvlMatch = itemBase === level || item.levelLabel === level;
+          const isRangeMatch = item.rangeName === originalRangeName || item.rangeName === trimmedRange;
+
+          if (isLvlMatch && isRangeMatch) {
+            return {
+              ...item,
+              rangeName: trimmedRange,
+              baseLevel: level,
+              customProb1: updatedEntry.prob1,
+              customProb2: updatedEntry.prob2,
+              customProb3: updatedEntry.prob3,
+              customProb4: updatedEntry.prob4,
+            };
+          }
+          return item;
+        }),
+      }));
+
+      return {
+        ...prev,
+        sections: nextSections,
+        bank: {
+          ...prev.bank,
+          [level]: prevLevelBank,
+        },
+        bankRangeOrder: {
+          ...(prev.bankRangeOrder || {}),
+          [level]: nextOrder,
+        },
+      };
     });
 
     setEditingBankItem(null);
-    showToast(`[${level}] [${trimmedRange}] 학습 범위 및 문제가 성공적으로 수정되었습니다.`);
+    showToast(`[${level}] [${trimmedRange}] 학습 범위 및 문제가 성공적으로 저장되어 수업 및 진도표에 즉시 반영되었습니다!`);
   };
 
   const handleDeleteBankRange = (lvl: string, rng: string) => {

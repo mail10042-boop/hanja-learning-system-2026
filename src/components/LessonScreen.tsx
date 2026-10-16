@@ -394,24 +394,21 @@ export const LessonScreen: React.FC<LessonScreenProps> = ({
 
   // Helper to extract problem text for a row item
   const getProblemTextForRow = (row: SectionRowItem, probNum: 1 | 2 | 3 | 4): string => {
+    // 1. Prioritize canonical problem bank registered text for this range
+    const baseLvl = row.baseLevel || extractBaseLevel(row.levelLabel);
+    const rangeData = state.bank[baseLvl]?.[row.rangeName] || state.bank[row.levelLabel]?.[row.rangeName];
+    if (rangeData) {
+      const probKey = `prob${probNum}` as keyof typeof rangeData;
+      const bankTxt = rangeData[probKey];
+      if (typeof bankTxt === 'string' && bankTxt.trim()) {
+        return bankTxt.trim();
+      }
+    }
+
+    // 2. Fallback to custom question override on this specific row
     const customKey = `customProb${probNum}` as keyof SectionRowItem;
     if (typeof row[customKey] === 'string' && (row[customKey] as string).trim()) {
       return (row[customKey] as string).trim();
-    }
-
-    const baseLvl = row.baseLevel || extractBaseLevel(row.levelLabel);
-    const rangeData = state.bank[baseLvl]?.[row.rangeName];
-    if (rangeData) {
-      const probKey = `prob${probNum}` as keyof typeof rangeData;
-      const txt = rangeData[probKey];
-      if (typeof txt === 'string' && txt.trim()) return txt.trim();
-    }
-
-    const directRangeData = state.bank[row.levelLabel]?.[row.rangeName];
-    if (directRangeData) {
-      const probKey = `prob${probNum}` as keyof typeof directRangeData;
-      const txt = directRangeData[probKey];
-      if (typeof txt === 'string' && txt.trim()) return txt.trim();
     }
 
     return '';
