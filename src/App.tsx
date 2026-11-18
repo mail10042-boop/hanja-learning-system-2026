@@ -3,9 +3,10 @@ import { Clock } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { LessonScreen } from './components/LessonScreen';
 import { QuizScreen } from './components/QuizScreen';
+import { SongQuizScreen } from './components/SongQuizScreen';
 import { AdminScreen } from './components/AdminScreen';
 import { FloatingTimer } from './components/FloatingTimer';
-import { AppState, ActiveTab } from './types';
+import { AppState, ActiveTab, SongLessonData, SongNumberSlot, SongQuizSet } from './types';
 import { INITIAL_STATE } from './data/initialData';
 import { sortHanjaLevels } from './utils/levelOrder';
 
@@ -88,6 +89,22 @@ function parseAndSanitizeState(parsed: any): AppState {
 
   const sections = ensureSectionItems(parsed.sections, sortedLevels, parsed.sectionPlans || INITIAL_STATE.sectionPlans);
 
+  const songCustomLessons: Record<string, string[]> =
+    parsed.songCustomLessons && typeof parsed.songCustomLessons === 'object' && !Array.isArray(parsed.songCustomLessons)
+      ? parsed.songCustomLessons
+      : {};
+  const songLessons: Record<string, SongLessonData> =
+    parsed.songLessons && typeof parsed.songLessons === 'object' && !Array.isArray(parsed.songLessons)
+      ? parsed.songLessons
+      : {};
+  const songNumberSlots: Record<number, SongNumberSlot> =
+    parsed.songNumberSlots && typeof parsed.songNumberSlots === 'object' && !Array.isArray(parsed.songNumberSlots)
+      ? parsed.songNumberSlots
+      : {};
+  const songQuizSets: SongQuizSet[] = Array.isArray(parsed.songQuizSets)
+    ? parsed.songQuizSets
+    : [];
+
   return {
     ...INITIAL_STATE,
     ...parsed,
@@ -98,6 +115,10 @@ function parseAndSanitizeState(parsed: any): AppState {
     quizPool,
     lessonData: normalizedLessonData,
     hiddenLevels: Array.isArray(parsed.hiddenLevels) ? parsed.hiddenLevels : [],
+    songCustomLessons,
+    songLessons,
+    songNumberSlots,
+    songQuizSets,
   };
 }
 
@@ -383,6 +404,14 @@ export default function App() {
         )}
         {activeTab === 'quiz' && (
           <QuizScreen
+            state={state}
+            onUpdateState={setState}
+            showFloatingTimer={showFloatingTimer}
+            onToggleFloatingTimer={handleToggleFloatingTimer}
+          />
+        )}
+        {activeTab === 'song' && (
+          <SongQuizScreen
             state={state}
             onUpdateState={setState}
             showFloatingTimer={showFloatingTimer}

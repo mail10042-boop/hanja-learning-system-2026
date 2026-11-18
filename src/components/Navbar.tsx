@@ -10,6 +10,7 @@ import {
   VolumeX,
   Clock,
   Cloud,
+  Music,
 } from 'lucide-react';
 import { ActiveTab } from '../types';
 
@@ -94,18 +95,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Navigation Tabs */}
-        <nav className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200 text-sm font-medium w-full md:w-auto justify-center">
+        <nav className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200 text-sm font-medium w-full md:w-auto justify-center">
           <button
             type="button"
             id="nav-btn-lesson"
             onClick={() => setActiveTab('lesson')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'lesson'
                 ? 'bg-slate-800 text-white shadow-xs font-semibold'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
             }`}
           >
-            <BookOpen className="w-4 h-4" />
+            <BookOpen className="w-4 h-4 shrink-0" />
             <span>수업 화면</span>
           </button>
 
@@ -113,27 +114,41 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             id="nav-btn-quiz"
             onClick={() => setActiveTab('quiz')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'quiz'
                 ? 'bg-slate-800 text-white shadow-xs font-semibold'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
             }`}
           >
-            <HelpCircle className="w-4 h-4" />
+            <HelpCircle className="w-4 h-4 shrink-0" />
             <span>실시간 문제 출제</span>
+          </button>
+
+          <button
+            type="button"
+            id="nav-btn-song"
+            onClick={() => setActiveTab('song')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'song'
+                ? 'bg-slate-800 text-white shadow-xs font-semibold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+            }`}
+          >
+            <Music className="w-4 h-4 shrink-0" />
+            <span>한자 노래 문제 출제</span>
           </button>
 
           <button
             type="button"
             id="nav-btn-admin"
             onClick={() => setActiveTab('admin')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'admin'
                 ? 'bg-slate-800 text-white shadow-xs font-semibold'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
             }`}
           >
-            <ShieldCheck className={`w-4 h-4 ${isAdminAuthenticated ? 'text-emerald-400' : ''}`} />
+            <ShieldCheck className={`w-4 h-4 shrink-0 ${isAdminAuthenticated ? 'text-emerald-400' : ''}`} />
             <span>관리자 모드</span>
             {isAdminAuthenticated && (
               <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" title="로그인 됨" />

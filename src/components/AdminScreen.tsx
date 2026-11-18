@@ -40,12 +40,22 @@ import {
   Copy,
   Clipboard,
   ClipboardCheck,
+  FileArchive,
 } from 'lucide-react';
 import { AppState, RangeProblemData, SectionItem, SectionRowItem } from '../types';
 import { INITIAL_STATE } from '../data/initialData';
 import { sortRangesByPage, getOrderedBankRanges } from '../utils/sorter';
 import { extractBaseLevel, sortHanjaLevels } from '../utils/levelOrder';
 import { RangeSearchPickerModal } from './RangeSearchPickerModal';
+import {
+  BackupExportReport,
+  BackupPreview,
+  exportFullBackupZip,
+  executeBackupRestore,
+  inspectBackupFile,
+  RestoreIntegrityReport,
+} from '../utils/backupZip';
+import { IntegrityReportModal, RestoreConfirmModal } from './BackupIntegrityModal';
 
 interface AdminScreenProps {
   state: AppState;
@@ -163,6 +173,15 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'paste'>('copy');
   const [clipboardJsonText, setClipboardJsonText] = useState('');
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+
+  // Full ZIP Backup & Pre-Restore Confirmation / Integrity Report Modals
+  const [backupPreview, setBackupPreview] = useState<BackupPreview | null>(null);
+  const [isBackupProcessing, setIsBackupProcessing] = useState(false);
+  const [integrityModal, setIntegrityModal] = useState<{
+    mode: 'export' | 'restore';
+    exportReport?: BackupExportReport | null;
+    restoreReport?: RestoreIntegrityReport | null;
+  } | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setFeedbackMsg({ text, type });
@@ -1091,23 +1110,51 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     }
   };
 
-  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileReader = new FileReader();
-    if (e.target.files && e.target.files[0]) {
-      fileReader.readAsText(e.target.files[0], 'UTF-8');
-      fileReader.onload = (event) => {
-        try {
-          const parsed = JSON.parse(event.target?.result as string);
-          if (parsed && (parsed.bank || parsed.sections || parsed.levels)) {
-            onUpdateState(() => ({ ...INITIAL_STATE, ...parsed, levels: sortHanjaLevels(parsed.levels || INITIAL_STATE.levels) }));
-            showToast('데이터를 성공적으로 불러왔습니다.');
-          } else {
-            showToast('올바르지 않은 백업 파일 형식입니다.', 'error');
-          }
-        } catch {
-          showToast('JSON 파일을 파싱하는 중 오류가 발생했습니다.', 'error');
-        }
-      };
+  const handleExportZip = async () => {
+    setIsBackupProcessing(true);
+    try {
+      const report = await exportFullBackupZip(state);
+      setIntegrityModal({ mode: 'export', exportReport: report });
+      showToast('전체 백업(ZIP·음원 포함) 파일이 생성되었습니다.');
+    } catch (err) {
+      console.error('ZIP export error:', err);
+      showToast('ZIP 백업 생성 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setIsBackupProcessing(false);
+    }
+  };
+
+  const handleBackupFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setIsBackupProcessing(true);
+    try {
+      const preview = await inspectBackupFile(file);
+      setBackupPreview(preview);
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : '백업 파일을 읽는 중 오류가 발생했습니다.',
+        'error'
+      );
+    } finally {
+      setIsBackupProcessing(false);
+    }
+  };
+
+  const handleConfirmBackupRestore = async () => {
+    if (!backupPreview) return;
+    setIsBackupProcessing(true);
+    try {
+      const report = await executeBackupRestore(backupPreview, onUpdateState);
+      setBackupPreview(null);
+      setIntegrityModal({ mode: 'restore', restoreReport: report });
+      showToast('전체 백업 복구 및 무결성 검증이 완료되었습니다.');
+    } catch (err) {
+      console.error('Restore error:', err);
+      showToast('복구 처리 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setIsBackupProcessing(false);
     }
   };
 
@@ -1300,15 +1347,27 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             <span>클라우드 불러오기</span>
           </button>
 
+          {/* Full ZIP Backup (includes real audio files) */}
+          <button
+            type="button"
+            onClick={handleExportZip}
+            disabled={isBackupProcessing}
+            className="flex items-center gap-1 bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg border border-indigo-500/70 transition cursor-pointer font-semibold disabled:opacity-50"
+            title="기존 한자 데이터 + 노래 가사 + 문제 단어 + 정답 한자 + 유튜브 링크 + 업로드 음원 파일까지 하나의 ZIP으로 백업합니다."
+          >
+            <FileArchive className="w-3.5 h-3.5 text-indigo-200" />
+            <span>{isBackupProcessing ? '처리 중...' : '전체 백업(ZIP)'}</span>
+          </button>
+
           {/* Safari & Cross-browser Download */}
           <button
             type="button"
             onClick={handleExportJSON}
             className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer"
-            title="사파리, 크롬 등 모든 브라우저에서 안전하게 파일로 다운로드합니다."
+            title="사파리, 크롬 등 모든 브라우저에서 JSON 파일로 다운로드합니다."
           >
             <Download className="w-3.5 h-3.5 text-blue-400" />
-            <span>백업 다운로드</span>
+            <span>JSON 백업</span>
           </button>
 
           {/* Clipboard Backup Text (Copy/Paste modal) */}
@@ -1324,8 +1383,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
           <label className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer">
             <Upload className="w-3.5 h-3.5 text-emerald-400" />
-            <span>파일 불러오기</span>
-            <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
+            <span>파일 복구(ZIP/JSON)</span>
+            <input type="file" accept=".zip,.json" onChange={handleBackupFileSelect} className="hidden" />
           </label>
 
           <button
@@ -2860,6 +2919,24 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {backupPreview && (
+        <RestoreConfirmModal
+          preview={backupPreview}
+          isRestoring={isBackupProcessing}
+          onCancel={() => setBackupPreview(null)}
+          onBackupCurrentFirst={handleExportZip}
+          onConfirmRestore={handleConfirmBackupRestore}
+        />
+      )}
+
+      {integrityModal && (
+        <IntegrityReportModal
+          mode={integrityModal.mode}
+          exportReport={integrityModal.exportReport}
+          restoreReport={integrityModal.restoreReport}
+          onClose={() => setIntegrityModal(null)}
+        />
       )}
     </div>
   );
