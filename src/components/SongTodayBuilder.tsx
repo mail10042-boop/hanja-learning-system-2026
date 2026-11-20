@@ -130,6 +130,8 @@ export const SongTodayBuilder: React.FC<SongTodayBuilderProps> = ({
   useEffect(() => {
     if (lessonsForDraftLevel.length > 0 && !lessonsForDraftLevel.includes(draftLessonName)) {
       setDraftLessonName(lessonsForDraftLevel[0]);
+    } else if (lessonsForDraftLevel.length === 0 && draftLessonName !== '') {
+      setDraftLessonName('');
     }
   }, [draftLevel, lessonsForDraftLevel, draftLessonName]);
 
@@ -610,7 +612,7 @@ export const SongTodayBuilder: React.FC<SongTodayBuilderProps> = ({
                   onClick={() => setShowAllLevels((v) => !v)}
                   className="text-[11px] font-semibold text-blue-700 hover:underline cursor-pointer"
                 >
-                  {showAllLevels ? '기본 급수(8~5급)만 보기' : '전체 급수 더보기'}
+                  {showAllLevels ? '주요 급수(8~5급·준5급)만 보기' : '전체 급수 더보기'}
                 </button>
               )}
             </div>
@@ -637,27 +639,33 @@ export const SongTodayBuilder: React.FC<SongTodayBuilderProps> = ({
               2) {draftLevel} 과 선택
             </span>
             <div className="flex flex-wrap gap-1.5">
-              {lessonsForDraftLevel.map((lName) => {
-                const lObj = state.songLessons?.[makeSongLessonId(draftLevel, lName)];
-                const lCount = getLessonSongHanjaLyrics(lObj).length;
-                return (
-                  <button
-                    key={lName}
-                    type="button"
-                    onClick={() => setDraftLessonName(lName)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                      draftLessonName === lName
-                        ? 'bg-blue-700 text-white border-blue-700'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {lName}
-                    {lCount > 0 && (
-                      <span className="ml-1 opacity-75">({lCount})</span>
-                    )}
-                  </button>
-                );
-              })}
+              {lessonsForDraftLevel.length === 0 ? (
+                <div className="text-xs text-slate-500 bg-slate-50 border border-dashed border-slate-300 rounded-xl px-3 py-2 w-full">
+                  등록된 과가 없습니다. &quot;노래 및 가사 관리&quot; 탭에서 과를 추가해 주세요.
+                </div>
+              ) : (
+                lessonsForDraftLevel.map((lName) => {
+                  const lObj = state.songLessons?.[makeSongLessonId(draftLevel, lName)];
+                  const lCount = getLessonSongHanjaLyrics(lObj).length;
+                  return (
+                    <button
+                      key={lName}
+                      type="button"
+                      onClick={() => setDraftLessonName(lName)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                        draftLessonName === lName
+                          ? 'bg-blue-700 text-white border-blue-700'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {lName}
+                      {lCount > 0 && (
+                        <span className="ml-1 opacity-75">({lCount})</span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

@@ -18,6 +18,8 @@ import {
   BookOpen,
   Download,
   Play,
+  CheckSquare,
+  RotateCcw,
 } from 'lucide-react';
 import {
   AppState,
@@ -29,6 +31,7 @@ import {
 } from '../types';
 import {
   getLessonHanjaCandidates,
+  getLessonsForLevel,
   HanjaCandidate,
   lookupHanjaChar,
 } from '../utils/hanjaDictionary';
@@ -90,17 +93,41 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
   useEffect(() => {
     if (managedLessons.length > 0 && !managedLessons.includes(selectedLessonName)) {
       setSelectedLessonName(managedLessons[0]);
+    } else if (managedLessons.length === 0 && selectedLessonName !== '') {
+      setSelectedLessonName('');
     }
   }, [selectedLevel, managedLessons, selectedLessonName]);
 
-  // Lesson CRUD inputs
+  // Lesson CRUD & Bulk-Select Delete inputs
   const [newLessonInput, setNewLessonInput] = useState<string>('');
   const [renamingLesson, setRenamingLesson] = useState<string | null>(null);
   const [renameLessonValue, setRenameLessonValue] = useState<string>('');
   const [confirmDeleteLesson, setConfirmDeleteLesson] = useState<string | null>(null);
+  const [lessonSelectMode, setLessonSelectMode] = useState<boolean>(false);
+  const [selectedLessonsToDelete, setSelectedLessonsToDelete] = useState<string[]>([]);
+  const [confirmBulkDeleteLessons, setConfirmBulkDeleteLessons] = useState<boolean>(false);
+
+  // Per-Hanja Lyric Bulk-Select Delete inputs
+  const [selectedLyricIds, setSelectedLyricIds] = useState<string[]>([]);
+  const [confirmBulkDeleteLyrics, setConfirmBulkDeleteLyrics] = useState<boolean>(false);
+
+  useEffect(() => {
+    setLessonSelectMode(false);
+    setSelectedLessonsToDelete([]);
+    setConfirmBulkDeleteLessons(false);
+    setConfirmDeleteLesson(null);
+    setRenamingLesson(null);
+  }, [selectedLevel]);
 
   const currentLessonId = makeSongLessonId(selectedLevel, selectedLessonName);
-  const savedLesson: SongLessonData | undefined = state.songLessons?.[currentLessonId];
+
+  useEffect(() => {
+    setSelectedLyricIds([]);
+    setConfirmBulkDeleteLyrics(false);
+  }, [currentLessonId]);
+  const savedLesson: SongLessonData | undefined = selectedLessonName
+    ? state.songLessons?.[currentLessonId]
+    : undefined;
   const currentLesson: SongLessonData = useMemo(
     () => savedLesson || createEmptySongLesson(selectedLevel, selectedLessonName),
     [savedLesson, selectedLevel, selectedLessonName]
@@ -337,8 +364,7 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
 
     onUpdateState((prev) => {
       const currentList = getManagedLessonsForLevel(prev, selectedLevel);
-      const filteredList = currentList.filter((n) => n !== lessonNameToDelete);
-      const nextList = filteredList.length > 0 ? filteredList : ['1과'];
+      const nextList = currentList.filter((n) => n !== lessonNameToDelete);
       const nextLessonsMap = { ...(prev.songLessons || {}) };
       delete nextLessonsMap[targetId];
       return {
@@ -352,11 +378,82 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
     });
 
     setConfirmDeleteLesson(null);
+    setSelectedLessonsToDelete((prev) => prev.filter((n) => n !== lessonNameToDelete));
     if (selectedLessonName === lessonNameToDelete) {
       const remaining = managedLessons.filter((n) => n !== lessonNameToDelete);
-      setSelectedLessonName(remaining[0] || '1과');
+      setSelectedLessonName(remaining[0] || '');
     }
     showToast(`[${selectedLevel} ${lessonNameToDelete}] 과가 삭제되었습니다.`);
+  };
+
+  const handleToggleSelectLessonForDelete = (lessonName: string) => {
+    setSelectedLessonsToDelete((prev) =>
+      prev.includes(lessonName) ? prev.filter((n) => n !== lessonName) : [...prev, lessonName]
+    );
+    setConfirmBulkDeleteLessons(false);
+  };
+
+  const handleBulkDeleteLessons = () => {
+    if (selectedLessonsToDelete.length === 0) return;
+    const toDeleteSet = new Set(selectedLessonsToDelete);
+
+    selectedLessonsToDelete.forEach((lName) => {
+      const tId = makeSongLessonId(selectedLevel, lName);
+      const tData = state.songLessons?.[tId];
+      if (tData) {
+        getSongMediaList(tData).forEach((m) => {
+          if (m.type === 'audio' && m.audioFile?.audioId) {
+            fetch(`/api/song-audio/${encodeURIComponent(m.audioFile.audioId)}`, {
+              method: 'DELETE',
+            }).catch(() => {});
+          }
+        });
+      }
+    });
+
+    onUpdateState((prev) => {
+      const currentList = getManagedLessonsForLevel(prev, selectedLevel);
+      const nextList = currentList.filter((n) => !toDeleteSet.has(n));
+      const nextLessonsMap = { ...(prev.songLessons || {}) };
+      selectedLessonsToDelete.forEach((lName) => {
+        delete nextLessonsMap[makeSongLessonId(selectedLevel, lName)];
+      });
+      return {
+        ...prev,
+        songCustomLessons: {
+          ...(prev.songCustomLessons || {}),
+          [selectedLevel]: nextList,
+        },
+        songLessons: nextLessonsMap,
+      };
+    });
+
+    const deletedCount = selectedLessonsToDelete.length;
+    if (toDeleteSet.has(selectedLessonName)) {
+      const remaining = managedLessons.filter((n) => !toDeleteSet.has(n));
+      setSelectedLessonName(remaining[0] || '');
+    }
+    setSelectedLessonsToDelete([]);
+    setConfirmBulkDeleteLessons(false);
+    setLessonSelectMode(false);
+    showToast(`[${selectedLevel}] 선택한 ${deletedCount}개 과가 한 번에 삭제되었습니다.`);
+  };
+
+  const handleRestoreSystemLessonsForLevel = () => {
+    const sysLessons = getLessonsForLevel(state, selectedLevel);
+    const toRestore = sysLessons.length > 0 ? sysLessons : ['1과'];
+    const merged = Array.from(new Set([...managedLessons, ...toRestore]));
+    onUpdateState((prev) => ({
+      ...prev,
+      songCustomLessons: {
+        ...(prev.songCustomLessons || {}),
+        [selectedLevel]: merged,
+      },
+    }));
+    if (!selectedLessonName && merged.length > 0) {
+      setSelectedLessonName(merged[0]);
+    }
+    showToast(`[${selectedLevel}] 기존 시스템 과 목록(${toRestore.length}개)을 불러왔습니다.`);
   };
 
   // =========================================================================
@@ -666,7 +763,39 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
         .filter((h) => h.id !== id)
         .map((item, i) => ({ ...item, order: i + 1 })),
     }));
+    setSelectedLyricIds((prev) => prev.filter((x) => x !== id));
     showToast('한자별 가사가 삭제되었습니다.');
+  };
+
+  const handleToggleSelectLyricRow = (id: string) => {
+    setSelectedLyricIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+    setConfirmBulkDeleteLyrics(false);
+  };
+
+  const handleToggleSelectAllLyrics = () => {
+    if (selectedLyricIds.length === hanjaLyricsList.length && hanjaLyricsList.length > 0) {
+      setSelectedLyricIds([]);
+    } else {
+      setSelectedLyricIds(hanjaLyricsList.map((h) => h.id));
+    }
+    setConfirmBulkDeleteLyrics(false);
+  };
+
+  const handleBulkDeleteLyrics = () => {
+    if (selectedLyricIds.length === 0) return;
+    const toDelete = new Set(selectedLyricIds);
+    const count = selectedLyricIds.length;
+    updateCurrentLesson((lesson) => ({
+      ...lesson,
+      hanjaLyrics: (lesson.hanjaLyrics || [])
+        .filter((h) => !toDelete.has(h.id))
+        .map((item, i) => ({ ...item, order: i + 1 })),
+    }));
+    setSelectedLyricIds([]);
+    setConfirmBulkDeleteLyrics(false);
+    showToast(`선택한 한자별 가사 ${count}개가 한 번에 삭제되었습니다.`);
   };
 
   // =========================================================================
@@ -857,7 +986,7 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
                   onClick={() => setShowAllLevels((v) => !v)}
                   className="text-xs font-bold text-blue-700 hover:underline cursor-pointer"
                 >
-                  {showAllLevels ? '기본 급수(8급~5급)만 보기' : '전체 급수(준6급/4급 등) 더보기'}
+                  {showAllLevels ? '주요 급수(8급~5급·준5급)만 보기' : '전체 급수(준6급/4급 등) 더보기'}
                 </button>
               )}
             </div>
@@ -887,20 +1016,20 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
               })}
             </div>
 
-            {/* Unlimited Lessons Management Bar (Add, Select, Rename, Delete) */}
+            {/* Unlimited Lessons Management Bar (Add, Select, Rename, Single & Bulk Delete) */}
             <div className="space-y-3 pt-2 border-t border-slate-100">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold text-slate-600">
-                  {selectedLevel} 과 목록 (원하는 만큼 추가·이름 수정·삭제 가능)
+                  {selectedLevel} 과 목록 ({managedLessons.length}개 · 원하는 만큼 추가·수정·선택 일괄 삭제 가능)
                 </span>
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <input
                     type="text"
                     value={newLessonInput}
                     onChange={(e) => setNewLessonInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleAddLesson()}
                     placeholder="새 과 이름 (예: 2과, 3과, 4과)"
-                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs w-48 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs w-44 sm:w-48 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     type="button"
@@ -910,131 +1039,265 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
                     <Plus className="w-3.5 h-3.5" />
                     <span>과 추가</span>
                   </button>
+
+                  {managedLessons.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLessonSelectMode((v) => !v);
+                        setSelectedLessonsToDelete([]);
+                        setConfirmBulkDeleteLessons(false);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border flex items-center gap-1 cursor-pointer whitespace-nowrap transition ${
+                        lessonSelectMode
+                          ? 'bg-rose-600 text-white border-rose-600'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <CheckSquare className="w-3.5 h-3.5" />
+                      <span>{lessonSelectMode ? '선택 삭제 종료' : '과 선택 삭제'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleRestoreSystemLessonsForLevel}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                    title="기존 학습 시스템에 등록된 과 목록을 다시 불러옵니다"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>기존 과 불러오기</span>
+                  </button>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {managedLessons.map((lName) => {
-                  const isActive = selectedLessonName === lName;
-                  const lData = state.songLessons?.[makeSongLessonId(selectedLevel, lName)];
-                  const sCount = getSongMediaList(lData).length;
-                  const hCount = getLessonSongHanjaLyrics(lData).length;
+              {/* Bulk Lesson Multi-Select Action Bar */}
+              {lessonSelectMode && managedLessons.length > 0 && (
+                <div className="bg-rose-50/80 border border-rose-200 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-bold text-rose-900">
+                      삭제할 과를 체크하세요 ({selectedLessonsToDelete.length}/{managedLessons.length}개 선택됨)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedLessonsToDelete([...managedLessons]);
+                        setConfirmBulkDeleteLessons(false);
+                      }}
+                      className="px-2.5 py-1 rounded bg-white border border-rose-300 text-rose-800 font-bold hover:bg-rose-100 cursor-pointer"
+                    >
+                      전체 선택
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedLessonsToDelete([]);
+                        setConfirmBulkDeleteLessons(false);
+                      }}
+                      className="px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 cursor-pointer"
+                    >
+                      선택 해제
+                    </button>
+                  </div>
 
-                  if (renamingLesson === lName) {
-                    return (
-                      <div
-                        key={lName}
-                        className="flex items-center gap-1 bg-blue-50 border border-blue-300 rounded-xl px-2 py-1"
+                  <div className="flex items-center gap-1.5">
+                    {!confirmBulkDeleteLessons ? (
+                      <button
+                        type="button"
+                        disabled={selectedLessonsToDelete.length === 0}
+                        onClick={() => setConfirmBulkDeleteLessons(true)}
+                        className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-slate-300 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
                       >
-                        <input
-                          type="text"
-                          value={renameLessonValue}
-                          onChange={(e) => setRenameLessonValue(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleConfirmRenameLesson(lName)}
-                          autoFocus
-                          className="px-2 py-1 rounded border border-blue-400 bg-white text-xs font-bold w-28"
-                        />
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>선택한 {selectedLessonsToDelete.length}개 과 한 번에 삭제</span>
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1.5 bg-white border border-rose-300 rounded-lg px-2.5 py-1 text-xs">
+                        <span className="font-bold text-rose-800">
+                          {selectedLessonsToDelete.length}개 과의 노래·가사를 삭제할까요?
+                        </span>
                         <button
                           type="button"
-                          onClick={() => handleConfirmRenameLesson(lName)}
-                          className="p-1 rounded bg-blue-600 text-white cursor-pointer"
-                          title="저장"
+                          onClick={handleBulkDeleteLessons}
+                          className="px-2.5 py-1 rounded bg-rose-600 text-white font-bold cursor-pointer"
                         >
-                          <Check className="w-3.5 h-3.5" />
+                          삭제 확인
                         </button>
                         <button
                           type="button"
-                          onClick={() => setRenamingLesson(null)}
-                          className="p-1 rounded bg-slate-200 text-slate-700 cursor-pointer"
-                          title="취소"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    );
-                  }
-
-                  if (confirmDeleteLesson === lName) {
-                    return (
-                      <div
-                        key={lName}
-                        className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 rounded-xl px-2.5 py-1.5 text-xs"
-                      >
-                        <span className="font-bold text-rose-800">{lName} 삭제할까요?</span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteLesson(lName)}
-                          className="px-2 py-0.5 rounded bg-rose-600 text-white font-bold cursor-pointer"
-                        >
-                          삭제
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteLesson(null)}
-                          className="px-2 py-0.5 rounded bg-white border border-slate-300 text-slate-700 font-bold cursor-pointer"
+                          onClick={() => setConfirmBulkDeleteLessons(false)}
+                          className="px-2 py-1 rounded bg-slate-200 text-slate-700 font-bold cursor-pointer"
                         >
                           취소
                         </button>
                       </div>
-                    );
-                  }
+                    )}
+                  </div>
+                </div>
+              )}
 
-                  return (
-                    <div
-                      key={lName}
-                      className={`flex items-center rounded-xl border transition ${
-                        isActive
-                          ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedLessonName(lName)}
-                        className="px-3 py-2 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              {managedLessons.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-500">
+                  {selectedLevel}에 등록된 과가 없습니다. 위에서 &quot;과 추가&quot; 또는 &quot;기존 과 불러오기&quot;를 눌러 과를 추가해 주세요.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {managedLessons.map((lName) => {
+                    const isActive = selectedLessonName === lName;
+                    const isCheckedForDelete = selectedLessonsToDelete.includes(lName);
+                    const lData = state.songLessons?.[makeSongLessonId(selectedLevel, lName)];
+                    const sCount = getSongMediaList(lData).length;
+                    const hCount = getLessonSongHanjaLyrics(lData).length;
+
+                    if (renamingLesson === lName) {
+                      return (
+                        <div
+                          key={lName}
+                          className="flex items-center gap-1 bg-blue-50 border border-blue-300 rounded-xl px-2 py-1"
+                        >
+                          <input
+                            type="text"
+                            value={renameLessonValue}
+                            onChange={(e) => setRenameLessonValue(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleConfirmRenameLesson(lName)}
+                            autoFocus
+                            className="px-2 py-1 rounded border border-blue-400 bg-white text-xs font-bold w-28"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmRenameLesson(lName)}
+                            className="p-1 rounded bg-blue-600 text-white cursor-pointer"
+                            title="저장"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRenamingLesson(null)}
+                            className="p-1 rounded bg-slate-200 text-slate-700 cursor-pointer"
+                            title="취소"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    if (confirmDeleteLesson === lName) {
+                      return (
+                        <div
+                          key={lName}
+                          className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 rounded-xl px-2.5 py-1.5 text-xs"
+                        >
+                          <span className="font-bold text-rose-800">{lName} 삭제할까요?</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteLesson(lName)}
+                            className="px-2 py-0.5 rounded bg-rose-600 text-white font-bold cursor-pointer"
+                          >
+                            삭제
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteLesson(null)}
+                            className="px-2 py-0.5 rounded bg-white border border-slate-300 text-slate-700 font-bold cursor-pointer"
+                          >
+                            취소
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    if (lessonSelectMode) {
+                      return (
+                        <label
+                          key={lName}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold cursor-pointer transition select-none ${
+                            isCheckedForDelete
+                              ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                              : 'bg-white text-slate-700 border-slate-300 hover:bg-rose-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isCheckedForDelete}
+                            onChange={() => handleToggleSelectLessonForDelete(lName)}
+                            className="w-3.5 h-3.5 rounded accent-rose-600 cursor-pointer"
+                          />
+                          <span>{lName}</span>
+                          {(sCount > 0 || hCount > 0) && (
+                            <span
+                              className={`text-[10px] ${
+                                isCheckedForDelete ? 'text-rose-100' : 'text-slate-500'
+                              }`}
+                            >
+                              (노래 {sCount} · 가사 {hCount})
+                            </span>
+                          )}
+                        </label>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={lName}
+                        className={`flex items-center rounded-xl border transition ${
+                          isActive
+                            ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
                       >
-                        <span>{lName}</span>
-                        {(sCount > 0 || hCount > 0) && (
-                          <span className={`text-[10px] ${isActive ? 'text-blue-200' : 'text-slate-500'}`}>
-                            (노래 {sCount} · 가사 {hCount})
-                          </span>
-                        )}
-                      </button>
-                      <div className="flex items-center pr-1.5 gap-0.5">
                         <button
                           type="button"
-                          onClick={() => {
-                            setRenamingLesson(lName);
-                            setRenameLessonValue(lName);
-                          }}
-                          className={`p-1 rounded transition cursor-pointer ${
-                            isActive
-                              ? 'text-blue-200 hover:text-white hover:bg-blue-600'
-                              : 'text-slate-400 hover:text-slate-700'
-                          }`}
-                          title="과 이름 수정"
+                          onClick={() => setSelectedLessonName(lName)}
+                          className="px-3 py-2 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                         >
-                          <Edit2 className="w-3 h-3" />
+                          <span>{lName}</span>
+                          {(sCount > 0 || hCount > 0) && (
+                            <span className={`text-[10px] ${isActive ? 'text-blue-200' : 'text-slate-500'}`}>
+                              (노래 {sCount} · 가사 {hCount})
+                            </span>
+                          )}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteLesson(lName)}
-                          className={`p-1 rounded transition cursor-pointer ${
-                            isActive
-                              ? 'text-blue-200 hover:text-rose-200 hover:bg-blue-600'
-                              : 'text-slate-400 hover:text-rose-600'
-                          }`}
-                          title="과 삭제"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        <div className="flex items-center pr-1.5 gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRenamingLesson(lName);
+                              setRenameLessonValue(lName);
+                            }}
+                            className={`p-1 rounded transition cursor-pointer ${
+                              isActive
+                                ? 'text-blue-200 hover:text-white hover:bg-blue-600'
+                                : 'text-slate-400 hover:text-slate-700'
+                            }`}
+                            title="과 이름 수정"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteLesson(lName)}
+                            className={`p-1 rounded transition cursor-pointer ${
+                              isActive
+                                ? 'text-blue-200 hover:text-rose-200 hover:bg-blue-600'
+                                : 'text-slate-400 hover:text-rose-600'
+                            }`}
+                            title="과 삭제"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
+
+          {selectedLessonName ? (
+            <>
 
           {/* Step 2: 과별 노래 등록 (유튜브 동영상 + 직접 음원 파일 여러 개 등록 가능) */}
           <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs space-y-5">
@@ -1396,140 +1659,232 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
               </div>
             </div>
 
-            {/* Per-Hanja Lyrics Table */}
+            {/* Per-Hanja Lyrics Table with Bulk Multi-Select Delete */}
             {hanjaLyricsList.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500">
                 아직 등록된 한자별 노래 가사가 없습니다. 위 입력창에서 추가하거나 &quot;기존 시스템 한자 불러오기&quot;를 눌러 시작하세요.
               </div>
             ) : (
-              <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-600">
-                      <th className="py-2.5 px-3 w-14 text-center">번호</th>
-                      <th className="py-2.5 px-3 w-20 text-center">한자</th>
-                      <th className="py-2.5 px-3 w-36">음과 뜻</th>
-                      <th className="py-2.5 px-3">노래 가사</th>
-                      <th className="py-2.5 px-3 w-36 text-right">관리</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 bg-white">
-                    {hanjaLyricsList.map((item, idx) => {
-                      const isEditing = editingLyricId === item.id;
-                      return (
-                        <tr key={item.id} className="hover:bg-slate-50/70">
-                          <td className="py-2.5 px-3 text-center text-xs font-mono font-bold text-slate-400 tabular-nums">
-                            {idx + 1}
-                          </td>
-                          {isEditing ? (
-                            <>
-                              <td className="py-2 px-2">
-                                <input
-                                  type="text"
-                                  value={editLyricChar}
-                                  onChange={(e) => setEditLyricChar(e.target.value)}
-                                  className="w-full px-2 py-1 rounded border border-blue-400 text-center font-bold"
-                                />
-                              </td>
-                              <td className="py-2 px-2">
-                                <input
-                                  type="text"
-                                  value={editLyricMeaning}
-                                  onChange={(e) => setEditLyricMeaning(e.target.value)}
-                                  className="w-full px-2 py-1 rounded border border-blue-400 text-xs font-semibold"
-                                />
-                              </td>
-                              <td className="py-2 px-2">
-                                <input
-                                  type="text"
-                                  value={editLyricText}
-                                  onChange={(e) => setEditLyricText(e.target.value)}
-                                  onKeyDown={(e) => e.key === 'Enter' && handleSaveEditLyricRow(item.id)}
-                                  className="w-full px-2 py-1 rounded border border-blue-400 text-sm"
-                                />
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                <div className="inline-flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSaveEditLyricRow(item.id)}
-                                    className="px-2.5 py-1 rounded bg-emerald-600 text-white text-xs font-bold cursor-pointer"
-                                  >
-                                    저장
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingLyricId(null)}
-                                    className="px-2 py-1 rounded bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
-                                  >
-                                    취소
-                                  </button>
-                                </div>
-                              </td>
-                            </>
-                          ) : (
-                            <>
-                              <td className="py-2.5 px-3 text-center text-2xl font-black text-slate-900">
-                                {item.hanjaChar || '—'}
-                              </td>
-                              <td className="py-2.5 px-3 text-xs font-bold text-slate-700">
-                                {item.hanjaMeaning}
-                              </td>
-                              <td className="py-2.5 px-3 text-sm font-medium text-slate-900">
-                                {item.lyricLine || (
-                                  <span className="text-slate-400 italic text-xs">
-                                    가사 미입력 (수정 버튼을 눌러 입력하세요)
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 text-right">
-                                <div className="inline-flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    disabled={idx === 0}
-                                    onClick={() => handleMoveLyricRow(idx, 'up')}
-                                    className="p-1 rounded text-slate-400 hover:text-slate-800 disabled:opacity-30 cursor-pointer"
-                                    title="위로"
-                                  >
-                                    <ChevronUp className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={idx === hanjaLyricsList.length - 1}
-                                    onClick={() => handleMoveLyricRow(idx, 'down')}
-                                    className="p-1 rounded text-slate-400 hover:text-slate-800 disabled:opacity-30 cursor-pointer"
-                                    title="아래로"
-                                  >
-                                    <ChevronDown className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleStartEditLyricRow(item)}
-                                    className="p-1.5 rounded text-slate-500 hover:text-blue-700 hover:bg-blue-50 cursor-pointer"
-                                    title="수정"
-                                  >
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteLyricRow(item.id)}
-                                    className="p-1.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
-                                    title="삭제"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={handleToggleSelectAllLyrics}
+                      className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 cursor-pointer flex items-center gap-1"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5 text-slate-600" />
+                      <span>
+                        {selectedLyricIds.length === hanjaLyricsList.length
+                          ? '전체 선택 해제'
+                          : `전체 선택 (${hanjaLyricsList.length}개)`}
+                      </span>
+                    </button>
+                    {selectedLyricIds.length > 0 && (
+                      <span className="font-bold text-rose-700">
+                        {selectedLyricIds.length}개 가사 선택됨
+                      </span>
+                    )}
+                  </div>
+
+                  {selectedLyricIds.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      {!confirmBulkDeleteLyrics ? (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmBulkDeleteLyrics(true)}
+                          className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>선택한 {selectedLyricIds.length}개 가사 한 번에 삭제</span>
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 rounded-lg px-2.5 py-1 text-xs">
+                          <span className="font-bold text-rose-800">
+                            {selectedLyricIds.length}개 가사를 삭제할까요?
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleBulkDeleteLyrics}
+                            className="px-2.5 py-1 rounded bg-rose-600 text-white font-bold cursor-pointer"
+                          >
+                            삭제 확인
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmBulkDeleteLyrics(false)}
+                            className="px-2 py-1 rounded bg-white border border-slate-300 text-slate-700 font-bold cursor-pointer"
+                          >
+                            취소
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-600">
+                        <th className="py-2.5 px-2.5 w-10 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              hanjaLyricsList.length > 0 &&
+                              selectedLyricIds.length === hanjaLyricsList.length
+                            }
+                            onChange={handleToggleSelectAllLyrics}
+                            aria-label="전체 가사 선택"
+                            className="w-4 h-4 rounded accent-rose-600 cursor-pointer"
+                          />
+                        </th>
+                        <th className="py-2.5 px-2.5 w-12 text-center">번호</th>
+                        <th className="py-2.5 px-3 w-20 text-center">한자</th>
+                        <th className="py-2.5 px-3 w-36">음과 뜻</th>
+                        <th className="py-2.5 px-3">노래 가사</th>
+                        <th className="py-2.5 px-3 w-36 text-right">관리</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {hanjaLyricsList.map((item, idx) => {
+                        const isEditing = editingLyricId === item.id;
+                        const isRowChecked = selectedLyricIds.includes(item.id);
+                        return (
+                          <tr
+                            key={item.id}
+                            className={
+                              isRowChecked ? 'bg-rose-50/50' : 'hover:bg-slate-50/70'
+                            }
+                          >
+                            <td className="py-2.5 px-2.5 text-center">
+                              <input
+                                type="checkbox"
+                                checked={isRowChecked}
+                                onChange={() => handleToggleSelectLyricRow(item.id)}
+                                aria-label={`${idx + 1}번 가사 선택`}
+                                className="w-4 h-4 rounded accent-rose-600 cursor-pointer"
+                              />
+                            </td>
+                            <td className="py-2.5 px-2.5 text-center text-xs font-mono font-bold text-slate-400 tabular-nums">
+                              {idx + 1}
+                            </td>
+                            {isEditing ? (
+                              <>
+                                <td className="py-2 px-2">
+                                  <input
+                                    type="text"
+                                    value={editLyricChar}
+                                    onChange={(e) => setEditLyricChar(e.target.value)}
+                                    className="w-full px-2 py-1 rounded border border-blue-400 text-center font-bold"
+                                  />
+                                </td>
+                                <td className="py-2 px-2">
+                                  <input
+                                    type="text"
+                                    value={editLyricMeaning}
+                                    onChange={(e) => setEditLyricMeaning(e.target.value)}
+                                    className="w-full px-2 py-1 rounded border border-blue-400 text-xs font-semibold"
+                                  />
+                                </td>
+                                <td className="py-2 px-2">
+                                  <input
+                                    type="text"
+                                    value={editLyricText}
+                                    onChange={(e) => setEditLyricText(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleSaveEditLyricRow(item.id)}
+                                    className="w-full px-2 py-1 rounded border border-blue-400 text-sm"
+                                  />
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveEditLyricRow(item.id)}
+                                      className="px-2.5 py-1 rounded bg-emerald-600 text-white text-xs font-bold cursor-pointer"
+                                    >
+                                      저장
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingLyricId(null)}
+                                      className="px-2 py-1 rounded bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+                                    >
+                                      취소
+                                    </button>
+                                  </div>
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="py-2.5 px-3 text-center text-2xl font-black text-slate-900">
+                                  {item.hanjaChar || '—'}
+                                </td>
+                                <td className="py-2.5 px-3 text-xs font-bold text-slate-700">
+                                  {item.hanjaMeaning}
+                                </td>
+                                <td className="py-2.5 px-3 text-sm font-medium text-slate-900">
+                                  {item.lyricLine || (
+                                    <span className="text-slate-400 italic text-xs">
+                                      가사 미입력 (수정 버튼을 눌러 입력하세요)
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 text-right">
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => handleMoveLyricRow(idx, 'up')}
+                                      className="p-1 rounded text-slate-400 hover:text-slate-800 disabled:opacity-30 cursor-pointer"
+                                      title="위로"
+                                    >
+                                      <ChevronUp className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === hanjaLyricsList.length - 1}
+                                      onClick={() => handleMoveLyricRow(idx, 'down')}
+                                      className="p-1 rounded text-slate-400 hover:text-slate-800 disabled:opacity-30 cursor-pointer"
+                                      title="아래로"
+                                    >
+                                      <ChevronDown className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStartEditLyricRow(item)}
+                                      className="p-1.5 rounded text-slate-500 hover:text-blue-700 hover:bg-blue-50 cursor-pointer"
+                                      title="수정"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteLyricRow(item.id)}
+                                      className="p-1.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                      title="삭제"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
+          </>
+          ) : (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+              {selectedLevel}에서 노래 및 가사를 관리할 과를 먼저 추가하거나 불러와 주세요.
+            </div>
+          )}
         </div>
       )}
 

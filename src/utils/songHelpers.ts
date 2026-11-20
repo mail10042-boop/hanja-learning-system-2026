@@ -7,7 +7,7 @@ import {
 } from '../types';
 import { getLessonHanjaCandidates, getLessonsForLevel } from './hanjaDictionary';
 
-export const PRIMARY_SONG_LEVELS = ['8급', '7급', '6급', '5급'] as const;
+export const PRIMARY_SONG_LEVELS = ['8급', '7급', '6급', '준5급', '5급'] as const;
 
 export const DEFAULT_WORD_FONT_SIZE = 88;
 export const DEFAULT_HANJA_FONT_SIZE = 44;
