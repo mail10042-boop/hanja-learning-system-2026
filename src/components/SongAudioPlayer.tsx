@@ -80,6 +80,7 @@ interface SongAudioPlayerProps {
   startTimeOverride?: number;
   endTimeOverride?: number | null;
   variant?: 'editor' | 'student';
+  layoutSize?: 'default' | 'hero' | 'compact';
 }
 
 export const SongAudioPlayer: React.FC<SongAudioPlayerProps> = ({
@@ -88,6 +89,7 @@ export const SongAudioPlayer: React.FC<SongAudioPlayerProps> = ({
   startTimeOverride,
   endTimeOverride,
   variant = 'editor',
+  layoutSize = 'default',
 }) => {
   const [speed, setSpeed] = useState<number>(1);
   const [volume, setVolume] = useState<number>(90);
@@ -455,20 +457,40 @@ export const SongAudioPlayer: React.FC<SongAudioPlayerProps> = ({
       {activeSource === 'youtube' ? (
         <div
           className={`w-full overflow-hidden rounded-xl bg-black border ${
-            isStudent ? 'border-slate-700 aspect-video' : 'border-slate-300 aspect-video max-h-56'
+            isStudent
+              ? layoutSize === 'hero'
+                ? 'border-slate-700 aspect-video max-h-[64vh] mx-auto'
+                : layoutSize === 'compact'
+                ? 'border-slate-700 aspect-video max-h-[240px]'
+                : 'border-slate-700 aspect-video'
+              : 'border-slate-300 aspect-video max-h-56'
           }`}
         >
           <div ref={ytContainerRef} className="w-full h-full" />
         </div>
       ) : (
         isStudent && (
-          <div className="rounded-xl bg-slate-800/80 border border-slate-700 p-5 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-              <Music className="w-6 h-6" />
+          <div
+            className={`rounded-xl bg-slate-800/80 border border-slate-700 flex items-center gap-4 ${
+              layoutSize === 'hero' ? 'p-8 sm:p-12' : layoutSize === 'compact' ? 'p-3.5' : 'p-5'
+            }`}
+          >
+            <div
+              className={`rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 ${
+                layoutSize === 'hero' ? 'w-16 h-16' : 'w-11 h-11'
+              }`}
+            >
+              <Music className={layoutSize === 'hero' ? 'w-8 h-8' : 'w-5 h-5'} />
             </div>
             <div className="min-w-0">
-              <div className="text-xs text-slate-400 font-semibold">업로드 노래 재생</div>
-              <div className="text-base font-bold text-white truncate">{displayTitle}</div>
+              <div className="text-xs text-slate-400 font-semibold">업로드 음원 재생</div>
+              <div
+                className={`font-bold text-white truncate ${
+                  layoutSize === 'hero' ? 'text-xl sm:text-2xl' : 'text-sm sm:text-base'
+                }`}
+              >
+                {displayTitle}
+              </div>
             </div>
           </div>
         )

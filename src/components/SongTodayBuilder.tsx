@@ -10,6 +10,7 @@ import {
   MousePointerClick,
   BookOpen,
   RotateCcw,
+  Sparkles,
 } from 'lucide-react';
 import {
   AppState,
@@ -370,6 +371,49 @@ export const SongTodayBuilder: React.FC<SongTodayBuilderProps> = ({
     });
   };
 
+  // One-click fill slots 1..10 using the currently selected grade & lesson's Hanja lyrics
+  const handleAutoFillSlotsFromDraftLesson = () => {
+    if (availableHanjaLyrics.length === 0) {
+      onNotify(`[${draftLevel} ${draftLessonName}]에 등록된 한자별 노래 가사가 없습니다.`, 'error');
+      return;
+    }
+    const chosenSong = availableSongs.find((s) => s.id === draftSongId) || availableSongs[0];
+    onUpdateState((prev) => {
+      const prevSlots = prev.songNumberSlots || {};
+      const nextSlots: Record<number, SongNumberSlot> = { ...prevSlots };
+      const count = Math.min(10, availableHanjaLyrics.length);
+      for (let i = 0; i < count; i++) {
+        const slotNum = i + 1;
+        const item = availableHanjaLyrics[i];
+        const prevSlot = nextSlots[slotNum];
+        nextSlots[slotNum] = {
+          slotNumber: slotNum,
+          isConfigured: true,
+          enabled: true,
+          level: draftLevel,
+          lessonName: draftLessonName,
+          songId: chosenSong?.id || '',
+          songTitle: chosenSong?.title || '',
+          lyricItemId: item.id,
+          fullLyric: item.lyricLine,
+          word: item.lyricLine || item.hanjaMeaning || item.hanjaChar,
+          startOffset: 0,
+          endOffset: (item.lyricLine || '').length,
+          hanjaChar: item.hanjaChar,
+          hanjaMeaning: item.hanjaMeaning,
+          startTime: Number(chosenSong?.startTime) || 0,
+          endTime: chosenSong?.endTime ?? null,
+          wordFontSize: prevSlot?.wordFontSize || DEFAULT_WORD_FONT_SIZE,
+          hanjaFontSize: prevSlot?.hanjaFontSize || DEFAULT_HANJA_FONT_SIZE,
+          meaningFontSize: prevSlot?.meaningFontSize || DEFAULT_MEANING_FONT_SIZE,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return { ...prev, songNumberSlots: nextSlots };
+    });
+    onNotify(`[${draftLevel} ${draftLessonName}] 가사 ${Math.min(10, availableHanjaLyrics.length)}개로 1~${Math.min(10, availableHanjaLyrics.length)}번이 자동 채워졌습니다.`);
+  };
+
   return (
     <div className="space-y-5">
       {/* Section 1: 1~10번 문제 번호 선택 버튼 그리드 */}
@@ -676,6 +720,16 @@ export const SongTodayBuilder: React.FC<SongTodayBuilderProps> = ({
                 </span>
               </p>
             </div>
+            {availableHanjaLyrics.length > 0 && (
+              <button
+                type="button"
+                onClick={handleAutoFillSlotsFromDraftLesson}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>이 과 가사로 1~{Math.min(10, availableHanjaLyrics.length)}번 자동 채우기</span>
+              </button>
+            )}
           </div>
 
           {/* Mobile / Tablet native selection confirm banner */}

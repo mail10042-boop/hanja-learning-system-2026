@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -37,6 +37,14 @@ interface SongStudentStageProps {
   onExit: () => void;
 }
 
+interface Level5CellItem {
+  number: number;
+  hanjaChar: string;
+  hanjaMeaning: string;
+  word?: string;
+  isClickableSlot: boolean;
+}
+
 export const SongStudentStage: React.FC<SongStudentStageProps> = ({
   state,
   activeSlotNumbers,
@@ -65,6 +73,13 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
   const [appliedAllFeedback, setAppliedAllFeedback] = useState<boolean>(false);
   const [overrideSongId, setOverrideSongId] = useState<string | null>(null);
 
+  // Measure 5급 2x5 grid height so 10 questions ALWAYS fit on one screen without scrolling
+  const grid5Ref = useRef<HTMLDivElement | null>(null);
+  const [grid5Size, setGrid5Size] = useState<{ width: number; height: number }>({
+    width: 800,
+    height: 540,
+  });
+
   useEffect(() => {
     if (orderedNumbers.length > 0 && !orderedNumbers.includes(currentSlotNum)) {
       setCurrentSlotNum(orderedNumbers[0]);
@@ -78,6 +93,23 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
   const currentPos = orderedNumbers.indexOf(currentSlotNum);
   const currentSlot: SongNumberSlot | null =
     currentPos >= 0 ? slotsMap[currentSlotNum] || null : null;
+
+  const isLevel5 = currentSlot?.level === '5급';
+
+  useEffect(() => {
+    if (!isLevel5 || !grid5Ref.current || typeof ResizeObserver === 'undefined') return;
+    const el = grid5Ref.current;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setGrid5Size({ width, height });
+        }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isLevel5, showFontControls]);
 
   const canPrev = currentPos > 0;
   const canNext = currentPos >= 0 && currentPos < orderedNumbers.length - 1;
@@ -214,12 +246,54 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
   const activeMedia: SongMediaItem | null =
     lessonSongs.find((s) => s.id === selectedSongId) || lessonSongs[0] || null;
 
-  // Reference Hanja + Meaning list for this lesson (NEVER highlight the answer Hanja)
   const referenceHanjaList = getReferenceHanjaListForLesson(
     state,
     currentSlot.level,
     currentSlot.lessonName
   );
+
+  // Build 10 cells for 5급 2x5 table: prioritize configured slots 1..10, fill any remaining from lesson Hanja
+  const level5Cells: Level5CellItem[] = useMemo(() => {
+    const cells: Level5CellItem[] = [];
+    const usedKeys = new Set<string>();
+
+    // Collect slots 1..10 first
+    for (let num = 1; num <= 10; num++) {
+      const slot = slotsMap[num];
+      if (slot && slot.isConfigured && (slot.hanjaChar || slot.hanjaMeaning)) {
+        const key = `${slot.hanjaChar}__${slot.hanjaMeaning}`;
+        usedKeys.add(key);
+        cells.push({
+          number: num,
+          hanjaChar: slot.hanjaChar,
+          hanjaMeaning: slot.hanjaMeaning,
+          word: slot.word,
+          isClickableSlot: orderedNumbers.includes(num),
+        });
+      } else {
+        cells.push({
+          number: num,
+          hanjaChar: '',
+          hanjaMeaning: '',
+          isClickableSlot: false,
+        });
+      }
+    }
+
+    // Fill any empty cells using referenceHanjaList from current 5급 lesson
+    const remainingRef = referenceHanjaList.filter(
+      (r) => !usedKeys.has(`${r.hanjaChar}__${r.hanjaMeaning}`)
+    );
+    let refCursor = 0;
+    for (let i = 0; i < 10; i++) {
+      if (!cells[i].hanjaChar && !cells[i].hanjaMeaning && refCursor < remainingRef.length) {
+        cells[i].hanjaChar = remainingRef[refCursor].hanjaChar;
+        cells[i].hanjaMeaning = remainingRef[refCursor].hanjaMeaning;
+        refCursor++;
+      }
+    }
+    return cells;
+  }, [slotsMap, orderedNumbers, referenceHanjaList]);
 
   const wordSize = clampFontSize(
     currentSlot.wordFontSize,
@@ -240,27 +314,49 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
     DEFAULT_MEANING_FONT_SIZE
   );
 
+  // Auto-fit math for 5급 so all 10 problems (2x5) ALWAYS stay inside one screen without scrolling!
+  const rowGap5 = hanjaSize > 64 ? 4 : 8;
+  const approxRowH = Math.max(46, (grid5Size.height - rowGap5 * 4) / 5);
+  const approxColW = Math.max(180, (grid5Size.width - rowGap5) / 2);
+  const fitHanja5 = Math.min(hanjaSize, Math.max(22, Math.floor(approxRowH * 0.66)));
+  const fitMeaning5 = Math.min(
+    meaningSize,
+    Math.max(13, Math.floor(approxRowH * 0.44)),
+    Math.floor((approxColW - fitHanja5 - 70) / 5)
+  );
+  const fitWord5Top = Math.min(wordSize, 64);
+
   return (
-    <div className="space-y-4">
-      {/* Top Bar: Exit, Number Jump Pills, Font Controls Toggle */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-2xs">
-        <div className="flex items-center gap-3 flex-wrap">
+    <div
+      className={
+        isLevel5
+          ? 'lg:h-[calc(100vh-118px)] lg:min-h-[580px] flex flex-col gap-2.5 lg:overflow-hidden'
+          : 'space-y-3'
+      }
+    >
+      {/* Compact Top Control Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white px-3.5 py-2 rounded-2xl border border-slate-200 shadow-2xs shrink-0">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
             onClick={onExit}
-            className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-3.5 h-3.5" />
             <span>수업 종료</span>
           </button>
 
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs font-bold text-slate-500">
+            {currentSlot.level} · {currentSlot.lessonName}
+          </span>
+
+          <div className="flex items-center gap-1 flex-wrap">
             {orderedNumbers.map((num) => (
               <button
                 key={num}
                 type="button"
                 onClick={() => setCurrentSlotNum(num)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold tabular-nums transition cursor-pointer whitespace-nowrap ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold tabular-nums transition cursor-pointer whitespace-nowrap ${
                   num === currentSlot.slotNumber
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -275,312 +371,400 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
         <button
           type="button"
           onClick={() => setShowFontControls((v) => !v)}
-          className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
             showFontControls
               ? 'bg-slate-800 text-white border-slate-800'
               : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
           }`}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
-          <span>글자 크기 설정 {showFontControls ? '접기' : '열기'}</span>
+          <span>글자 크기 조절 {showFontControls ? '접기' : '열기'}</span>
         </button>
       </div>
 
-      {/* Collapsible Independent Font Size Controls (Saved per slot & Apply-to-all) */}
+      {/* Font Size Slider Controls (Word, Hanja, Meaning independent sliders + +/- + save) */}
       {showFontControls && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3">
+        <div className="bg-white rounded-2xl border border-slate-200 px-4 py-2.5 shadow-2xs space-y-2 shrink-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs font-bold text-slate-700">
-              문제 {currentSlot.slotNumber}번 글자 크기 독립 조절 (변경 시 자동 저장)
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-slate-700">
+              문제 {currentSlot.slotNumber}번 글자 크기 슬라이더 조절 (즉시 반영·저장)
+            </span>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleApplyFontSizesToAllSlots}
-                className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+                className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap"
               >
                 <CopyCheck className="w-3.5 h-3.5" />
-                <span>{appliedAllFeedback ? '전체 문제에 적용 완료' : '모든 문제에 동일 크기 적용'}</span>
+                <span>{appliedAllFeedback ? '전체 적용 완료' : '모든 문제에 동일 크기 적용'}</span>
               </button>
               <button
                 type="button"
                 onClick={handleResetSlotFontSizes}
-                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 transition cursor-pointer whitespace-nowrap"
+                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>기본 크기 초기화</span>
+                <RotateCcw className="w-3 h-3" />
+                <span>초기화</span>
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* 1. Problem Word Size */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-bold text-slate-800">문제 단어 크기</div>
-                <div className="text-[11px] text-slate-500 tabular-nums">
-                  {MIN_WORD_FONT_SIZE}~{MAX_WORD_FONT_SIZE}px
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  aria-label="문제 단어 작게"
-                  onClick={() => updateSlotFontSize('wordFontSize', wordSize - 8)}
-                  className="p-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </button>
-                <input
-                  type="number"
-                  min={MIN_WORD_FONT_SIZE}
-                  max={MAX_WORD_FONT_SIZE}
-                  value={wordSize}
-                  onChange={(e) => updateSlotFontSize('wordFontSize', Number(e.target.value))}
-                  aria-label="문제 단어 크기 px 입력"
-                  className="w-16 px-2 py-1.5 rounded-lg border border-slate-300 bg-white text-center text-xs font-mono font-bold tabular-nums"
-                />
-                <span className="text-xs text-slate-500 font-mono">px</span>
-                <button
-                  type="button"
-                  aria-label="문제 단어 크게"
-                  onClick={() => updateSlotFontSize('wordFontSize', wordSize + 8)}
-                  className="p-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+            {/* 1. 출제 가사 크기 Slider */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-700 whitespace-nowrap w-20">
+                출제 가사
+              </span>
+              <button
+                type="button"
+                aria-label="출제 가사 작게"
+                onClick={() => updateSlotFontSize('wordFontSize', wordSize - 6)}
+                className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <input
+                type="range"
+                min={MIN_WORD_FONT_SIZE}
+                max={MAX_WORD_FONT_SIZE}
+                value={wordSize}
+                onChange={(e) => updateSlotFontSize('wordFontSize', Number(e.target.value))}
+                aria-label="출제 가사 크기 슬라이더"
+                className="flex-1 h-1.5 accent-slate-900 cursor-pointer"
+              />
+              <button
+                type="button"
+                aria-label="출제 가사 크게"
+                onClick={() => updateSlotFontSize('wordFontSize', wordSize + 6)}
+                className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+              <span className="text-[11px] font-mono font-bold tabular-nums text-slate-800 w-11 text-right shrink-0">
+                {wordSize}px
+              </span>
             </div>
 
-            {/* 2. Hanja Character Size */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-bold text-slate-800">한자 크기</div>
-                <div className="text-[11px] text-slate-500 tabular-nums">
-                  {MIN_HANJA_FONT_SIZE}~{MAX_HANJA_FONT_SIZE}px
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  aria-label="한자 작게"
-                  onClick={() => updateSlotFontSize('hanjaFontSize', hanjaSize - 4)}
-                  className="p-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </button>
-                <input
-                  type="number"
-                  min={MIN_HANJA_FONT_SIZE}
-                  max={MAX_HANJA_FONT_SIZE}
-                  value={hanjaSize}
-                  onChange={(e) => updateSlotFontSize('hanjaFontSize', Number(e.target.value))}
-                  aria-label="한자 크기 px 입력"
-                  className="w-16 px-2 py-1.5 rounded-lg border border-slate-300 bg-white text-center text-xs font-mono font-bold tabular-nums"
-                />
-                <span className="text-xs text-slate-500 font-mono">px</span>
-                <button
-                  type="button"
-                  aria-label="한자 크게"
-                  onClick={() => updateSlotFontSize('hanjaFontSize', hanjaSize + 4)}
-                  className="p-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              </div>
+            {/* 2. 한자 크기 Slider */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-700 whitespace-nowrap w-20">
+                한자 크기
+              </span>
+              <button
+                type="button"
+                aria-label="한자 작게"
+                onClick={() => updateSlotFontSize('hanjaFontSize', hanjaSize - 4)}
+                className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <input
+                type="range"
+                min={MIN_HANJA_FONT_SIZE}
+                max={MAX_HANJA_FONT_SIZE}
+                value={hanjaSize}
+                onChange={(e) => updateSlotFontSize('hanjaFontSize', Number(e.target.value))}
+                aria-label="한자 크기 슬라이더"
+                className="flex-1 h-1.5 accent-blue-700 cursor-pointer"
+              />
+              <button
+                type="button"
+                aria-label="한자 크게"
+                onClick={() => updateSlotFontSize('hanjaFontSize', hanjaSize + 4)}
+                className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+              <span className="text-[11px] font-mono font-bold tabular-nums text-slate-800 w-11 text-right shrink-0">
+                {hanjaSize}px
+              </span>
             </div>
 
-            {/* 3. Hun-eum Meaning Size */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-bold text-slate-800">음과 뜻 크기</div>
-                <div className="text-[11px] text-slate-500 tabular-nums">
-                  {MIN_MEANING_FONT_SIZE}~{MAX_MEANING_FONT_SIZE}px
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  aria-label="음과 뜻 작게"
-                  onClick={() => updateSlotFontSize('meaningFontSize', meaningSize - 2)}
-                  className="p-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </button>
-                <input
-                  type="number"
-                  min={MIN_MEANING_FONT_SIZE}
-                  max={MAX_MEANING_FONT_SIZE}
-                  value={meaningSize}
-                  onChange={(e) => updateSlotFontSize('meaningFontSize', Number(e.target.value))}
-                  aria-label="음과 뜻 크기 px 입력"
-                  className="w-16 px-2 py-1.5 rounded-lg border border-slate-300 bg-white text-center text-xs font-mono font-bold tabular-nums"
-                />
-                <span className="text-xs text-slate-500 font-mono">px</span>
-                <button
-                  type="button"
-                  aria-label="음과 뜻 크게"
-                  onClick={() => updateSlotFontSize('meaningFontSize', meaningSize + 2)}
-                  className="p-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              </div>
+            {/* 3. 뜻·음 크기 Slider */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-700 whitespace-nowrap w-20">
+                뜻·음 크기
+              </span>
+              <button
+                type="button"
+                aria-label="뜻과 음 작게"
+                onClick={() => updateSlotFontSize('meaningFontSize', meaningSize - 2)}
+                className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <input
+                type="range"
+                min={MIN_MEANING_FONT_SIZE}
+                max={MAX_MEANING_FONT_SIZE}
+                value={meaningSize}
+                onChange={(e) => updateSlotFontSize('meaningFontSize', Number(e.target.value))}
+                aria-label="뜻과 음 크기 슬라이더"
+                className="flex-1 h-1.5 accent-emerald-700 cursor-pointer"
+              />
+              <button
+                type="button"
+                aria-label="뜻과 음 크게"
+                onClick={() => updateSlotFontSize('meaningFontSize', meaningSize + 2)}
+                className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+              <span className="text-[11px] font-mono font-bold tabular-nums text-slate-800 w-11 text-right shrink-0">
+                {meaningSize}px
+              </span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Main 2-Column Split Layout: Left = Question & Hanja Reference, Right = Audio/Video Player */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* LEFT COLUMN: Problem Area */}
-        <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 shadow-sm p-5 sm:p-8 space-y-6">
-          {/* Header Row: Problem Number & Level/Lesson */}
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-4">
-            <div className="text-lg sm:text-xl font-black text-slate-900">
-              문제 {currentSlot.slotNumber}
-            </div>
-            <div className="text-sm sm:text-base font-bold text-slate-600 flex items-center gap-2">
-              <span>{currentSlot.level}</span>
-              <span aria-hidden="true">·</span>
-              <span className="text-blue-700">{currentSlot.lessonName}</span>
-              <span aria-hidden="true">·</span>
-              <span className="text-slate-500 tabular-nums">
-                ({currentPos + 1} / {orderedNumbers.length})
+      {/* ================================================================= */}
+      {/* MODE A: 5급 화면 (10문제 2열×5행 도표 한 화면 스크롤 없이 + 위쪽 가사)    */}
+      {/* ================================================================= */}
+      {isLevel5 ? (
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[68fr_32fr] gap-3 items-stretch">
+          {/* Left: Top Lyric Word + 2x5 10-Question Table */}
+          <div className="flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200 p-3 shadow-xs gap-2.5">
+            {/* 표 위쪽: 출제자가 입력한 노래 가사 단어 */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white text-xs font-black tabular-nums shrink-0">
+                  {currentSlot.slotNumber}번 문제
+                </span>
+                <span
+                  style={{ fontSize: `${fitWord5Top}px`, lineHeight: 1.15 }}
+                  className="font-black text-slate-950 tracking-tight break-keep select-none"
+                >
+                  {currentSlot.word}
+                </span>
+              </div>
+              <span className="text-xs font-semibold text-slate-500 shrink-0">
+                5급 · 10문제 한눈에 보기 (2열 × 5행)
               </span>
             </div>
-          </div>
 
-          {/* Dragged Target Word Box (Independent wordFontSize) */}
-          <div className="min-h-[160px] flex items-center justify-center bg-slate-50 rounded-2xl border border-slate-200 px-5 py-8 text-center">
+            {/* 2열 × 5행 10문제 도표 (한 화면에 스크롤 없이 고정 맞춤) */}
             <div
-              style={{ fontSize: `${wordSize}px`, lineHeight: 1.2 }}
-              className="font-black text-slate-950 tracking-tight break-keep select-none"
+              ref={grid5Ref}
+              style={{ gap: `${rowGap5}px` }}
+              className="flex-1 min-h-[380px] lg:min-h-0 grid grid-cols-2 grid-rows-5 overflow-hidden"
             >
-              {currentSlot.word}
-            </div>
-          </div>
-
-          {/* Reference Hanja + Hun-eum List (Strictly NO answer highlighting) */}
-          <div className="space-y-3">
-            <div className="text-xs font-bold text-slate-500">
-              {currentSlot.level} {currentSlot.lessonName} 한자 참고 목록 (화이트보드에 알맞은 한자를 써 보세요)
-            </div>
-
-            {referenceHanjaList.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
-                이 과에 등록된 한자 정보가 없습니다.
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                {referenceHanjaList.map((entry, idx) => (
-                  <div
-                    key={`${entry.hanjaChar}_${entry.hanjaMeaning}_${idx}`}
-                    className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 flex flex-col items-center justify-center text-center gap-1"
-                  >
-                    {entry.hanjaChar && (
-                      <div
-                        style={{ fontSize: `${hanjaSize}px`, lineHeight: 1.15 }}
-                        className="font-bold text-slate-900 select-none"
-                      >
-                        {entry.hanjaChar}
-                      </div>
-                    )}
-                    {entry.hanjaMeaning && (
-                      <div
-                        style={{ fontSize: `${meaningSize}px`, lineHeight: 1.3 }}
-                        className="font-semibold text-slate-700 select-none break-keep"
-                      >
-                        {entry.hanjaMeaning}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Teacher Prev / Next Navigation */}
-          <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={handlePrev}
-              disabled={!canPrev}
-              className={`flex-1 sm:flex-initial px-5 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition cursor-pointer ${
-                canPrev
-                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
-                  : 'bg-slate-50 text-slate-300 border border-slate-200 cursor-not-allowed'
-              }`}
-            >
-              <ChevronLeft className="w-5 h-5" />
-              <span>이전 문제</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleNext}
-              disabled={!canNext}
-              className={`flex-1 sm:flex-initial px-5 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition cursor-pointer ${
-                canNext
-                  ? 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm'
-                  : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-              }`}
-            >
-              <span>다음 문제</span>
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Song & Video Player Area */}
-        <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
-              <Music className="w-4 h-4 text-blue-600" />
-              <span>노래 및 동영상 재생</span>
-            </div>
-            <span className="text-xs text-slate-500 font-semibold">
-              {currentSlot.level} · {currentSlot.lessonName}
-            </span>
-          </div>
-
-          {/* If this lesson has multiple songs, let teacher switch seamlessly during class */}
-          {lessonSongs.length > 1 && (
-            <div className="flex flex-wrap gap-1.5">
-              {lessonSongs.map((s) => {
-                const isSel = activeMedia?.id === s.id;
+              {level5Cells.map((cell) => {
+                const isCurrentCell = cell.number === currentSlot.slotNumber;
                 return (
                   <button
-                    key={s.id}
+                    key={cell.number}
                     type="button"
-                    onClick={() => setOverrideSongId(s.id)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer truncate max-w-[180px] ${
-                      isSel
-                        ? 'bg-slate-900 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                    title={s.title}
+                    disabled={!cell.isClickableSlot}
+                    onClick={() => {
+                      if (cell.isClickableSlot) {
+                        setCurrentSlotNum(cell.number);
+                      }
+                    }}
+                    className={`min-h-0 min-w-0 rounded-xl border px-3 py-1 flex items-center justify-between gap-2 text-left overflow-hidden transition ${
+                      isCurrentCell
+                        ? 'bg-slate-50 border-slate-400'
+                        : 'bg-white border-slate-200'
+                    } ${cell.isClickableSlot ? 'cursor-pointer hover:bg-slate-50' : 'cursor-default'}`}
                   >
-                    {s.title}
+                    <div className="flex items-center gap-2.5 min-w-0 shrink-0">
+                      <span className="text-xs font-mono font-black text-slate-400 tabular-nums w-5 shrink-0">
+                        {cell.number}
+                      </span>
+                      <span
+                        style={{ fontSize: `${fitHanja5}px`, lineHeight: 1 }}
+                        className="font-black text-slate-950 select-none leading-none shrink-0"
+                      >
+                        {cell.hanjaChar || '—'}
+                      </span>
+                    </div>
+                    <span
+                      style={{ fontSize: `${fitMeaning5}px`, lineHeight: 1.2 }}
+                      className="font-bold text-slate-700 text-right break-keep truncate min-w-0"
+                    >
+                      {cell.hanjaMeaning || ''}
+                    </span>
                   </button>
                 );
               })}
             </div>
-          )}
+          </div>
 
-          <SongAudioPlayer
-            media={activeMedia}
-            lesson={lessonObj}
-            startTimeOverride={
-              overrideSongId ? activeMedia?.startTime : currentSlot.startTime
-            }
-            endTimeOverride={
-              overrideSongId ? activeMedia?.endTime ?? null : currentSlot.endTime
-            }
-            variant="student"
-          />
+          {/* Right: Compact YouTube/Audio Player + Prev/Next */}
+          <div className="flex flex-col justify-between gap-2.5 bg-white rounded-2xl border border-slate-200 p-3 shadow-xs min-h-0">
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                  <Music className="w-4 h-4 text-blue-600" />
+                  <span>노래 · 동영상 재생</span>
+                </div>
+                {lessonSongs.length > 1 && (
+                  <div className="flex flex-wrap gap-1">
+                    {lessonSongs.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setOverrideSongId(s.id)}
+                        className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer truncate max-w-[110px] ${
+                          activeMedia?.id === s.id
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {s.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <SongAudioPlayer
+                media={activeMedia}
+                lesson={lessonObj}
+                startTimeOverride={
+                  overrideSongId ? activeMedia?.startTime : currentSlot.startTime
+                }
+                endTimeOverride={
+                  overrideSongId ? activeMedia?.endTime ?? null : currentSlot.endTime
+                }
+                variant="student"
+                layoutSize="compact"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handlePrev}
+                disabled={!canPrev}
+                className={`flex-1 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer ${
+                  canPrev
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                    : 'bg-slate-50 text-slate-300 border border-slate-200 cursor-not-allowed'
+                }`}
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>이전 문제</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={!canNext}
+                className={`flex-1 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer ${
+                  canNext
+                    ? 'bg-slate-900 hover:bg-slate-800 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                }`}
+              >
+                <span>다음 문제</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        /* ================================================================= */
+        /* MODE B: 8급·7급·6급 화면 (동영상 영역 70% : 문제 출제 영역 30%)          */
+        /* ================================================================= */
+        <div className="grid grid-cols-1 lg:grid-cols-[7fr_3fr] gap-3 items-stretch">
+          {/* LEFT 70%: YouTube Video / Audio Player */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs flex flex-col justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                <Music className="w-4 h-4 text-blue-600" />
+                <span>노래 및 유튜브 동영상 ({currentSlot.level} · {currentSlot.lessonName})</span>
+              </div>
+
+              {lessonSongs.length > 1 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {lessonSongs.map((s) => {
+                    const isSel = activeMedia?.id === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setOverrideSongId(s.id)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer truncate max-w-[160px] ${
+                          isSel
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                        title={s.title}
+                      >
+                        {s.title}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <SongAudioPlayer
+              media={activeMedia}
+              lesson={lessonObj}
+              startTimeOverride={
+                overrideSongId ? activeMedia?.startTime : currentSlot.startTime
+              }
+              endTimeOverride={
+                overrideSongId ? activeMedia?.endTime ?? null : currentSlot.endTime
+              }
+              variant="student"
+              layoutSize="hero"
+            />
+          </div>
+
+          {/* RIGHT 30%: Problem Number + Large Lyric Word + Prev/Next */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs flex flex-col justify-between gap-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <span className="text-lg font-black text-slate-900 tabular-nums">
+                {currentSlot.slotNumber}번 문제
+              </span>
+              <span className="text-xs font-bold text-slate-500 tabular-nums">
+                {currentPos + 1} / {orderedNumbers.length}
+              </span>
+            </div>
+
+            <div className="flex-1 min-h-[220px] flex items-center justify-center bg-slate-50 rounded-2xl border border-slate-200 p-4 text-center">
+              <div
+                style={{ fontSize: `${wordSize}px`, lineHeight: 1.2 }}
+                className="font-black text-slate-950 tracking-tight break-keep select-none"
+              >
+                {currentSlot.word}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handlePrev}
+                disabled={!canPrev}
+                className={`flex-1 py-3 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-1 transition cursor-pointer ${
+                  canPrev
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                    : 'bg-slate-50 text-slate-300 border border-slate-200 cursor-not-allowed'
+                }`}
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>이전 문제</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={!canNext}
+                className={`flex-1 py-3 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-1 transition cursor-pointer ${
+                  canNext
+                    ? 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                }`}
+              >
+                <span>다음 문제</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
