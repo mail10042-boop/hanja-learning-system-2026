@@ -48,9 +48,12 @@ interface TenHanjaCellItem {
   isClickableSlot: boolean;
 }
 
+type TenGridLayoutMode = '2x5' | '5x2' | '4x3';
+
 const VIDEO_WIDTH_STORAGE_KEY = 'hanja_song_video_width_pct';
 const GRID_VIDEO_WIDTH_STORAGE_KEY = 'hanja_song_grid_video_width_pct';
 const SEMI5_GRID_STORAGE_KEY = 'hanja_song_semi5_show_grid';
+const TEN_GRID_LAYOUT_STORAGE_KEY = 'hanja_song_ten_grid_layout';
 
 export const SongStudentStage: React.FC<SongStudentStageProps> = ({
   state,
@@ -89,13 +92,22 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
     return 80;
   });
 
-  // 5급 (and 준5급 when 10-Hanja grid ON): Side video panel width %, default 32%, resizable 20% ~ 55%
+  // 5급 (and 준5급 when 10-Hanja grid ON): Side video panel width %, default 32%, resizable 15% ~ 55%
   const [gridVideoPct, setGridVideoPct] = useState<number>(() => {
     try {
       const saved = Number(localStorage.getItem(GRID_VIDEO_WIDTH_STORAGE_KEY));
-      if (Number.isFinite(saved) && saved >= 20 && saved <= 55) return Math.round(saved);
+      if (Number.isFinite(saved) && saved >= 15 && saved <= 55) return Math.round(saved);
     } catch {}
     return 32;
+  });
+
+  // 5급 / 준5급 10-Hanja grid layout: 2열×5행 (default), 5열×2행, or 4열×3행
+  const [tenGridLayout, setTenGridLayout] = useState<TenGridLayoutMode>(() => {
+    try {
+      const saved = localStorage.getItem(TEN_GRID_LAYOUT_STORAGE_KEY);
+      if (saved === '2x5' || saved === '5x2' || saved === '4x3') return saved;
+    } catch {}
+    return '2x5';
   });
 
   // 준5급 toggle: whether to show 10 Hanja + 뜻·음 below/with selected lyric
@@ -128,10 +140,17 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
   };
 
   const updateGridVideoPct = (next: number) => {
-    const clamped = Math.max(20, Math.min(55, Math.round(next)));
+    const clamped = Math.max(15, Math.min(55, Math.round(next)));
     setGridVideoPct(clamped);
     try {
       localStorage.setItem(GRID_VIDEO_WIDTH_STORAGE_KEY, String(clamped));
+    } catch {}
+  };
+
+  const updateTenGridLayout = (next: TenGridLayoutMode) => {
+    setTenGridLayout(next);
+    try {
+      localStorage.setItem(TEN_GRID_LAYOUT_STORAGE_KEY, next);
     } catch {}
   };
 
@@ -164,13 +183,6 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
     window.addEventListener('pointerup', onUp);
   };
 
-  // Measure 2x5 grid container height so 10 Hanja items ALWAYS fit on one screen without scrolling
-  const gridTenRef = useRef<HTMLDivElement | null>(null);
-  const [gridTenSize, setGridTenSize] = useState<{ width: number; height: number }>({
-    width: 800,
-    height: 540,
-  });
-
   useEffect(() => {
     if (orderedNumbers.length > 0 && !orderedNumbers.includes(currentSlotNum)) {
       setCurrentSlotNum(orderedNumbers[0]);
@@ -188,21 +200,6 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
   const isLevel5 = currentSlot?.level === '5급';
   const isLevelSemi5 = currentSlot?.level === '준5급';
   const showTenGridLayout = isLevel5 || (isLevelSemi5 && showSemi5Grid);
-
-  useEffect(() => {
-    if (!showTenGridLayout || !gridTenRef.current || typeof ResizeObserver === 'undefined') return;
-    const el = gridTenRef.current;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          setGridTenSize({ width, height });
-        }
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [showTenGridLayout, showFontControls, gridVideoPct]);
 
   const canPrev = currentPos > 0;
   const canNext = currentPos >= 0 && currentPos < orderedNumbers.length - 1;
@@ -418,14 +415,35 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
   );
 
   // Allow Hanja, meaning, and lyric word to grow freely up to full slider max (240px / 120px)
-  const isExpandedTenGrid = hanjaSize > 72 || meaningSize > 34 || wordSize > 72;
+  const isStackedTenCell = tenGridLayout === '5x2' || tenGridLayout === '4x3';
+  const isExpandedTenGrid =
+    tenGridLayout === '5x2'
+      ? hanjaSize > 116 || meaningSize > 42 || wordSize > 72
+      : tenGridLayout === '4x3'
+      ? hanjaSize > 96 || meaningSize > 38 || wordSize > 72
+      : hanjaSize > 72 || meaningSize > 34 || wordSize > 72;
+
   const rowGapTen = hanjaSize > 100 ? 10 : hanjaSize > 64 ? 6 : 8;
   const fitHanjaTen = hanjaSize;
   const fitMeaningTen = meaningSize;
   const fitWordTenTop = wordSize;
   const minCellHeightTen = isExpandedTenGrid
-    ? Math.max(88, Math.ceil(Math.max(hanjaSize * 1.16, meaningSize * 1.6) + 18))
+    ? isStackedTenCell
+      ? Math.max(120, Math.ceil(hanjaSize * 1.15 + meaningSize * 1.4 + 46))
+      : Math.max(88, Math.ceil(Math.max(hanjaSize * 1.16, meaningSize * 1.6) + 18))
     : undefined;
+
+  const tenGridClassName = isExpandedTenGrid
+    ? tenGridLayout === '5x2'
+      ? 'grid grid-cols-2 sm:grid-cols-5 auto-rows-auto'
+      : tenGridLayout === '4x3'
+      ? 'grid grid-cols-2 sm:grid-cols-4 auto-rows-auto'
+      : 'grid grid-cols-1 sm:grid-cols-2 auto-rows-auto'
+    : tenGridLayout === '5x2'
+    ? 'flex-1 min-h-[320px] lg:min-h-0 grid grid-cols-2 sm:grid-cols-5 sm:grid-rows-2 overflow-hidden'
+    : tenGridLayout === '4x3'
+    ? 'flex-1 min-h-[340px] lg:min-h-0 grid grid-cols-2 sm:grid-cols-4 sm:grid-rows-3 overflow-hidden'
+    : 'flex-1 min-h-[380px] lg:min-h-0 grid grid-cols-2 grid-rows-5 overflow-hidden';
 
   // When video is wide (e.g. 80%), keep lyric font legible inside the right column without horizontal clipping
   const rightColShare = Math.max(15, 100 - videoWidthPct);
@@ -667,7 +685,7 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
               </button>
               <input
                 type="range"
-                min={showTenGridLayout ? 20 : 40}
+                min={showTenGridLayout ? 15 : 40}
                 max={showTenGridLayout ? 55 : 85}
                 value={showTenGridLayout ? gridVideoPct : videoWidthPct}
                 onChange={(e) =>
@@ -707,7 +725,7 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
         >
           {/* Main Left Area: Top Selected Lyric Word + 2x5 10 Hanja & Meaning Grid */}
           <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200 p-3 shadow-xs gap-2.5">
-            {/* Top: Teacher-selected lyric word */}
+            {/* Top: Teacher-selected lyric word + 10-Hanja Grid Layout Selector (2x5 / 5x2 / 4x3) */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 flex flex-wrap items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white text-xs font-black tabular-nums shrink-0">
@@ -720,55 +738,105 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
                   {currentSlot.word}
                 </span>
               </div>
-              <span className="text-xs font-semibold text-slate-500 shrink-0">
-                {currentSlot.level} · 10개 한자·뜻음 격자 (2열 × 5행)
-              </span>
+              <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  {currentSlot.level} · 10개 한자·뜻음
+                </span>
+                <div
+                  className="flex items-center gap-1 p-1 bg-slate-200/80 rounded-lg shrink-0"
+                  role="group"
+                  aria-label="한자 격자 배열 선택"
+                >
+                  {(['2x5', '5x2', '4x3'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => updateTenGridLayout(mode)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-bold transition whitespace-nowrap shrink-0 cursor-pointer ${
+                        tenGridLayout === mode
+                          ? 'bg-slate-900 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {mode === '2x5' ? '2열×5행' : mode === '5x2' ? '5열×2행' : '4열×3행'}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            {/* 2열 × 5행 10개 한자·뜻·음 격자 (기본 크기는 한 화면 맞춤, 확대 시 원하는 크기만큼 자유롭게 확장) */}
+            {/* 10개 한자·뜻·음 격자 (2열×5행 / 5열×2행 / 4열×3행 전환, 확대 시 자유 확장) */}
             <div
-              ref={gridTenRef}
               style={{ gap: `${rowGapTen}px` }}
-              className={
-                isExpandedTenGrid
-                  ? 'grid grid-cols-1 sm:grid-cols-2 auto-rows-auto'
-                  : 'flex-1 min-h-[380px] lg:min-h-0 grid grid-cols-2 grid-rows-5 overflow-hidden'
-              }
+              className={tenGridClassName}
             >
-              {tenHanjaCells.map((cell) => (
-                <button
-                  key={cell.number}
-                  type="button"
-                  disabled={!cell.isClickableSlot}
-                  onClick={() => {
-                    if (cell.isClickableSlot) {
-                      setCurrentSlotNum(cell.number);
-                    }
-                  }}
-                  style={minCellHeightTen ? { minHeight: `${minCellHeightTen}px` } : undefined}
-                  className={`min-h-0 min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-2 flex items-center justify-between gap-3 text-left transition ${
-                    isExpandedTenGrid ? 'flex-wrap' : 'overflow-hidden'
-                  } ${cell.isClickableSlot ? 'cursor-pointer hover:bg-slate-50' : 'cursor-default'}`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0 shrink-0">
-                    <span className="text-xs font-mono font-black text-slate-400 tabular-nums w-5 shrink-0">
+              {tenHanjaCells.map((cell) =>
+                isStackedTenCell ? (
+                  <button
+                    key={cell.number}
+                    type="button"
+                    disabled={!cell.isClickableSlot}
+                    onClick={() => {
+                      if (cell.isClickableSlot) {
+                        setCurrentSlotNum(cell.number);
+                      }
+                    }}
+                    style={minCellHeightTen ? { minHeight: `${minCellHeightTen}px` } : undefined}
+                    className={`relative min-h-0 min-w-0 rounded-xl border border-slate-200 bg-white px-2.5 py-3 flex flex-col items-center justify-center gap-1.5 text-center transition ${
+                      isExpandedTenGrid ? 'overflow-visible' : 'overflow-hidden'
+                    } ${cell.isClickableSlot ? 'cursor-pointer hover:bg-slate-50' : 'cursor-default'}`}
+                  >
+                    <span className="absolute top-2 left-2.5 text-xs font-mono font-black text-slate-400 tabular-nums">
                       {cell.number}
                     </span>
                     <span
                       style={{ fontSize: `${fitHanjaTen}px`, lineHeight: 1.05 }}
-                      className="font-black text-slate-950 select-none shrink-0"
+                      className="font-black text-slate-950 select-none leading-none"
                     >
                       {cell.hanjaChar || '—'}
                     </span>
-                  </div>
-                  <span
-                    style={{ fontSize: `${fitMeaningTen}px`, lineHeight: 1.2 }}
-                    className="font-bold text-slate-700 text-right break-keep min-w-0"
+                    <span
+                      style={{ fontSize: `${fitMeaningTen}px`, lineHeight: 1.2 }}
+                      className="font-bold text-slate-700 text-center break-keep max-w-full"
+                    >
+                      {cell.hanjaMeaning || ''}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    key={cell.number}
+                    type="button"
+                    disabled={!cell.isClickableSlot}
+                    onClick={() => {
+                      if (cell.isClickableSlot) {
+                        setCurrentSlotNum(cell.number);
+                      }
+                    }}
+                    style={minCellHeightTen ? { minHeight: `${minCellHeightTen}px` } : undefined}
+                    className={`min-h-0 min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-2 flex items-center justify-between gap-3 text-left transition ${
+                      isExpandedTenGrid ? 'flex-wrap' : 'overflow-hidden'
+                    } ${cell.isClickableSlot ? 'cursor-pointer hover:bg-slate-50' : 'cursor-default'}`}
                   >
-                    {cell.hanjaMeaning || ''}
-                  </span>
-                </button>
-              ))}
+                    <div className="flex items-center gap-2.5 min-w-0 shrink-0">
+                      <span className="text-xs font-mono font-black text-slate-400 tabular-nums w-5 shrink-0">
+                        {cell.number}
+                      </span>
+                      <span
+                        style={{ fontSize: `${fitHanjaTen}px`, lineHeight: 1.05 }}
+                        className="font-black text-slate-950 select-none shrink-0"
+                      >
+                        {cell.hanjaChar || '—'}
+                      </span>
+                    </div>
+                    <span
+                      style={{ fontSize: `${fitMeaningTen}px`, lineHeight: 1.2 }}
+                      className="font-bold text-slate-700 text-right break-keep min-w-0"
+                    >
+                      {cell.hanjaMeaning || ''}
+                    </span>
+                  </button>
+                )
+              )}
             </div>
           </div>
 
