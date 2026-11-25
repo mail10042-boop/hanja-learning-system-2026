@@ -141,18 +141,34 @@ async function startServer() {
     }
   });
 
-  // Upload or restore an audio file (raw binary body up to 100MB)
+  // Upload or restore an audio file (supports both JSON base64 and raw binary body)
   app.post(
     '/api/song-audio',
-    express.raw({ type: '*/*', limit: '100mb' }),
+    express.raw({ type: 'application/octet-stream', limit: '100mb' }),
     (req, res) => {
       try {
-        const buffer = req.body as Buffer;
-        if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+        if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR, { recursive: true });
+
+        let buffer: Buffer | null = null;
+        let bodyFileName = '';
+        let bodyMimeType = '';
+        let bodyAudioId = '';
+
+        if (Buffer.isBuffer(req.body)) {
+          buffer = req.body;
+        } else if (req.body && typeof req.body === 'object' && typeof req.body.base64 === 'string') {
+          buffer = Buffer.from(req.body.base64, 'base64');
+          bodyFileName = typeof req.body.fileName === 'string' ? req.body.fileName : '';
+          bodyMimeType = typeof req.body.mimeType === 'string' ? req.body.mimeType : '';
+          bodyAudioId = typeof req.body.audioId === 'string' ? req.body.audioId : '';
+        }
+
+        if (!buffer || buffer.length === 0) {
           return res.status(400).json({ success: false, error: 'Empty audio file payload' });
         }
 
-        const rawFileName = typeof req.query.fileName === 'string' ? req.query.fileName : 'audio.mp3';
+        const rawFileName =
+          bodyFileName || (typeof req.query.fileName === 'string' ? req.query.fileName : 'audio.mp3');
         let decodedFileName = rawFileName;
         try {
           decodedFileName = decodeURIComponent(rawFileName);
@@ -161,13 +177,15 @@ async function startServer() {
         }
 
         const rawMimeType =
+          bodyMimeType ||
           (typeof req.query.mimeType === 'string' && req.query.mimeType) ||
           req.headers['content-type'] ||
           '';
         const mimeType = resolveAudioMimeType(decodedFileName, rawMimeType);
 
-        const requestedId =
-          typeof req.query.audioId === 'string' ? sanitizeAudioId(req.query.audioId) : '';
+        const requestedId = sanitizeAudioId(
+          bodyAudioId || (typeof req.query.audioId === 'string' ? req.query.audioId : '')
+        );
         const audioId =
           requestedId || `aud_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
@@ -193,21 +211,31 @@ async function startServer() {
     }
   );
 
-  // Chunked audio upload: receive a binary chunk (prevents proxy 32MB limit errors)
+  // Chunked audio upload: receive a chunk via JSON base64 OR raw binary
   app.post(
     '/api/song-audio/chunk',
-    express.raw({ type: '*/*', limit: '10mb' }),
+    express.raw({ type: 'application/octet-stream', limit: '10mb' }),
     (req, res) => {
       try {
-        const buffer = req.body as Buffer;
-        if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+        if (!fs.existsSync(AUDIO_TMP_DIR)) fs.mkdirSync(AUDIO_TMP_DIR, { recursive: true });
+
+        let buffer: Buffer | null = null;
+        let rawUploadId = typeof req.query.uploadId === 'string' ? req.query.uploadId : '';
+        let chunkIndex = Number(req.query.chunkIndex);
+
+        if (Buffer.isBuffer(req.body)) {
+          buffer = req.body;
+        } else if (req.body && typeof req.body === 'object' && typeof req.body.chunkBase64 === 'string') {
+          buffer = Buffer.from(req.body.chunkBase64, 'base64');
+          if (typeof req.body.uploadId === 'string') rawUploadId = req.body.uploadId;
+          if (req.body.chunkIndex !== undefined) chunkIndex = Number(req.body.chunkIndex);
+        }
+
+        if (!buffer || buffer.length === 0) {
           return res.status(400).json({ success: false, error: 'Empty chunk payload' });
         }
 
-        const rawUploadId = typeof req.query.uploadId === 'string' ? req.query.uploadId : '';
         const uploadId = sanitizeAudioId(rawUploadId);
-        const chunkIndex = Number(req.query.chunkIndex);
-
         if (!uploadId || !Number.isInteger(chunkIndex) || chunkIndex < 0) {
           return res.status(400).json({ success: false, error: 'Invalid uploadId or chunkIndex' });
         }
