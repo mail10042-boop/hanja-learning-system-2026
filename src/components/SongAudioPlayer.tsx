@@ -12,6 +12,7 @@ import {
   Music,
 } from 'lucide-react';
 import { SongLessonData, SongMediaItem } from '../types';
+import { loadLocalAudioBlobUrl } from '../utils/localAudioStore';
 
 export const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 
@@ -101,6 +102,7 @@ export const SongAudioPlayer: React.FC<SongAudioPlayerProps> = ({
   const [ytReady, setYtReady] = useState<boolean>(false);
   const [ytError, setYtError] = useState<string>('');
   const [audioError, setAudioError] = useState<string>('');
+  const [resolvedBlobUrl, setResolvedBlobUrl] = useState<string>('');
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ytContainerRef = useRef<HTMLDivElement | null>(null);
@@ -143,9 +145,43 @@ export const SongAudioPlayer: React.FC<SongAudioPlayerProps> = ({
   const endTime =
     rawEnd !== null && rawEnd !== undefined && Number(rawEnd) > startTime ? Number(rawEnd) : null;
 
+  const rawAudioId = resolvedAudioMeta?.audioId || '';
+  const isLocalBlobId = rawAudioId.startsWith('local_aud_');
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrlToRevoke = '';
+    if (!hasAudio || !isLocalBlobId) {
+      setResolvedBlobUrl('');
+      return;
+    }
+    loadLocalAudioBlobUrl(rawAudioId)
+      .then((url) => {
+        if (cancelled) {
+          if (url) URL.revokeObjectURL(url);
+          return;
+        }
+        if (url) {
+          objectUrlToRevoke = url;
+          setResolvedBlobUrl(url);
+        } else {
+          setAudioError('브라우저에 저장된 음원 데이터를 찾을 수 없습니다.');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAudioError('로컬 음원 파일을 불러오지 못했습니다.');
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
+    };
+  }, [hasAudio, isLocalBlobId, rawAudioId]);
+
   const audioSrc =
-    hasAudio && resolvedAudioMeta?.audioId
-      ? `/api/song-audio/${encodeURIComponent(resolvedAudioMeta.audioId)}`
+    hasAudio && rawAudioId
+      ? isLocalBlobId
+        ? resolvedBlobUrl
+        : `/api/song-audio/${encodeURIComponent(rawAudioId)}`
       : '';
 
   const displayTitle =

@@ -14,11 +14,11 @@ export const DEFAULT_HANJA_FONT_SIZE = 44;
 export const DEFAULT_MEANING_FONT_SIZE = 20;
 
 export const MIN_WORD_FONT_SIZE = 24;
-export const MAX_WORD_FONT_SIZE = 200;
+export const MAX_WORD_FONT_SIZE = 240;
 export const MIN_HANJA_FONT_SIZE = 18;
-export const MAX_HANJA_FONT_SIZE = 140;
+export const MAX_HANJA_FONT_SIZE = 240;
 export const MIN_MEANING_FONT_SIZE = 12;
-export const MAX_MEANING_FONT_SIZE = 72;
+export const MAX_MEANING_FONT_SIZE = 120;
 
 export function clampFontSize(val: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(val)) return fallback;

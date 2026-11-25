@@ -3,6 +3,7 @@ import { AppState, SongAudioFileMeta, SongLessonData, SongNumberSlot } from '../
 import { INITIAL_STATE } from '../data/initialData';
 import { sortHanjaLevels } from './levelOrder';
 import { getLessonSongHanjaLyrics, getSongMediaList } from './songHelpers';
+import { loadLocalAudioBuffer, saveLocalAudioBlob } from './localAudioStore';
 
 export interface SongIntegrityStats {
   levelCount: number;
@@ -165,12 +166,19 @@ export async function exportFullBackupZip(state: AppState): Promise<BackupExport
 
   for (const { label, meta } of allAudioEntries) {
     try {
-      const res = await fetch(`/api/song-audio/${encodeURIComponent(meta.audioId)}`);
-      if (!res.ok) {
+      let arrayBuf: ArrayBuffer | null = null;
+      if (meta.audioId.startsWith('local_aud_')) {
+        arrayBuf = await loadLocalAudioBuffer(meta.audioId);
+      } else {
+        const res = await fetch(`/api/song-audio/${encodeURIComponent(meta.audioId)}`);
+        if (res.ok) {
+          arrayBuf = await res.arrayBuffer();
+        }
+      }
+      if (!arrayBuf) {
         missingAudioFiles.push(label);
         continue;
       }
-      const arrayBuf = await res.arrayBuffer();
       const safeFileName = (meta.fileName || `${meta.audioId}.mp3`).replace(/[/\\?%*:|"<>]/g, '_');
       const zipEntryName = `${meta.audioId}__${safeFileName}`;
       audioFolder?.file(zipEntryName, arrayBuf);
@@ -361,6 +369,13 @@ export async function executeBackupRestore(
 
   for (const item of preview.audioEntries) {
     try {
+      if (item.audioId.startsWith('local_aud_')) {
+        await saveLocalAudioBlob(item.blob, item.fileName, item.mimeType, item.audioId);
+        audioRestoredCount += 1;
+        audioVerifiedCount += 1;
+        continue;
+      }
+
       const uploadRes = await fetch(
         `/api/song-audio?audioId=${encodeURIComponent(item.audioId)}&fileName=${encodeURIComponent(
           item.fileName
@@ -371,6 +386,13 @@ export async function executeBackupRestore(
           body: item.blob,
         }
       );
+
+      if (uploadRes.status === 404) {
+        await saveLocalAudioBlob(item.blob, item.fileName, item.mimeType, item.audioId);
+        audioRestoredCount += 1;
+        audioVerifiedCount += 1;
+        continue;
+      }
 
       if (!uploadRes.ok) {
         failedAudioFiles.push(item.fileName);
@@ -396,6 +418,15 @@ export async function executeBackupRestore(
     const allAudio = collectAllAudioMeta(preview.parsedState);
     for (const { meta } of allAudio) {
       try {
+        if (meta.audioId.startsWith('local_aud_')) {
+          const buf = await loadLocalAudioBuffer(meta.audioId);
+          if (buf) {
+            audioVerifiedCount += 1;
+          } else {
+            failedAudioFiles.push(`${meta.fileName} (브라우저 로컬 음원 없음)`);
+          }
+          continue;
+        }
         const checkRes = await fetch(`/api/song-audio/${encodeURIComponent(meta.audioId)}`, {
           method: 'HEAD',
         });

@@ -57,6 +57,7 @@ import {
 import { IntegrityReportModal, RestoreConfirmModal } from './BackupIntegrityModal';
 import { playBeep } from '../utils/audio';
 import { uploadSongAudioFile } from '../utils/songAudioUpload';
+import { deleteLocalAudioBlob } from '../utils/localAudioStore';
 
 interface SongQuizScreenProps {
   state: AppState;
@@ -369,9 +370,13 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
     if (targetData) {
       getSongMediaList(targetData).forEach((m) => {
         if (m.type === 'audio' && m.audioFile?.audioId) {
-          fetch(`/api/song-audio/${encodeURIComponent(m.audioFile.audioId)}`, {
-            method: 'DELETE',
-          }).catch(() => {});
+          if (m.audioFile.audioId.startsWith('local_aud_')) {
+            deleteLocalAudioBlob(m.audioFile.audioId);
+          } else {
+            fetch(`/api/song-audio/${encodeURIComponent(m.audioFile.audioId)}`, {
+              method: 'DELETE',
+            }).catch(() => {});
+          }
         }
       });
     }
@@ -417,9 +422,13 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
       if (tData) {
         getSongMediaList(tData).forEach((m) => {
           if (m.type === 'audio' && m.audioFile?.audioId) {
-            fetch(`/api/song-audio/${encodeURIComponent(m.audioFile.audioId)}`, {
-              method: 'DELETE',
-            }).catch(() => {});
+            if (m.audioFile.audioId.startsWith('local_aud_')) {
+              deleteLocalAudioBlob(m.audioFile.audioId);
+            } else {
+              fetch(`/api/song-audio/${encodeURIComponent(m.audioFile.audioId)}`, {
+                method: 'DELETE',
+              }).catch(() => {});
+            }
           }
         });
       }
@@ -614,9 +623,13 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
       }));
 
       if (oldAudioId && oldAudioId !== meta.audioId) {
-        fetch(`/api/song-audio/${encodeURIComponent(oldAudioId)}`, { method: 'DELETE' }).catch(
-          () => {}
-        );
+        if (oldAudioId.startsWith('local_aud_')) {
+          deleteLocalAudioBlob(oldAudioId);
+        } else {
+          fetch(`/api/song-audio/${encodeURIComponent(oldAudioId)}`, { method: 'DELETE' }).catch(
+            () => {}
+          );
+        }
       }
       showToast(`음원 파일이 [${file.name}]으로 교체되었습니다.`);
     } catch (err) {
@@ -658,9 +671,13 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
 
   const handleDeleteSong = (song: SongMediaItem) => {
     if (song.type === 'audio' && song.audioFile?.audioId) {
-      fetch(`/api/song-audio/${encodeURIComponent(song.audioFile.audioId)}`, {
-        method: 'DELETE',
-      }).catch(() => {});
+      if (song.audioFile.audioId.startsWith('local_aud_')) {
+        deleteLocalAudioBlob(song.audioFile.audioId);
+      } else {
+        fetch(`/api/song-audio/${encodeURIComponent(song.audioFile.audioId)}`, {
+          method: 'DELETE',
+        }).catch(() => {});
+      }
     }
     updateCurrentLesson((lesson) => ({
       ...lesson,

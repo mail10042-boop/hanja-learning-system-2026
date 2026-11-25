@@ -417,28 +417,28 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
     DEFAULT_MEANING_FONT_SIZE
   );
 
-  // Auto-fit math for 2x5 10-Hanja grid so all 10 items stay inside one screen without scrolling!
-  const rowGapTen = hanjaSize > 64 ? 4 : 8;
-  const approxRowH = Math.max(46, (gridTenSize.height - rowGapTen * 4) / 5);
-  const approxColW = Math.max(180, (gridTenSize.width - rowGapTen) / 2);
-  const fitHanjaTen = Math.min(hanjaSize, Math.max(22, Math.floor(approxRowH * 0.68)));
-  const fitMeaningTen = Math.min(
-    meaningSize,
-    Math.max(13, Math.floor(approxRowH * 0.44)),
-    Math.max(13, Math.floor((approxColW - fitHanjaTen - 68) / 4.5))
-  );
-  const fitWordTenTop = Math.min(wordSize, 64);
+  // Allow Hanja, meaning, and lyric word to grow freely up to full slider max (240px / 120px)
+  const isExpandedTenGrid = hanjaSize > 72 || meaningSize > 34 || wordSize > 72;
+  const rowGapTen = hanjaSize > 100 ? 10 : hanjaSize > 64 ? 6 : 8;
+  const fitHanjaTen = hanjaSize;
+  const fitMeaningTen = meaningSize;
+  const fitWordTenTop = wordSize;
+  const minCellHeightTen = isExpandedTenGrid
+    ? Math.max(88, Math.ceil(Math.max(hanjaSize * 1.16, meaningSize * 1.6) + 18))
+    : undefined;
 
   // When video is wide (e.g. 80%), keep lyric font legible inside the right column without horizontal clipping
   const rightColShare = Math.max(15, 100 - videoWidthPct);
   const fitWordSide =
-    isDesktop && rightColShare <= 24 ? Math.min(wordSize, 64) : wordSize;
+    isDesktop && rightColShare <= 24 ? Math.min(wordSize, 88) : wordSize;
 
   return (
     <div
       className={
         showTenGridLayout
-          ? 'lg:h-[calc(100vh-118px)] lg:min-h-[580px] flex flex-col gap-2.5 lg:overflow-hidden'
+          ? isExpandedTenGrid
+            ? 'flex flex-col gap-2.5'
+            : 'lg:h-[calc(100vh-118px)] lg:min-h-[580px] flex flex-col gap-2.5 lg:overflow-hidden'
           : 'space-y-3'
       }
     >
@@ -548,7 +548,7 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
               <button
                 type="button"
                 aria-label="출제 가사 작게"
-                onClick={() => updateSlotFontSize('wordFontSize', wordSize - 6)}
+                onClick={() => updateSlotFontSize('wordFontSize', wordSize - 8)}
                 className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
               >
                 <Minus className="w-3 h-3" />
@@ -565,7 +565,7 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
               <button
                 type="button"
                 aria-label="출제 가사 크게"
-                onClick={() => updateSlotFontSize('wordFontSize', wordSize + 6)}
+                onClick={() => updateSlotFontSize('wordFontSize', wordSize + 8)}
                 className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
               >
                 <Plus className="w-3 h-3" />
@@ -585,7 +585,7 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
                   <button
                     type="button"
                     aria-label="한자 작게"
-                    onClick={() => updateSlotFontSize('hanjaFontSize', hanjaSize - 4)}
+                    onClick={() => updateSlotFontSize('hanjaFontSize', hanjaSize - 8)}
                     className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
                   >
                     <Minus className="w-3 h-3" />
@@ -602,7 +602,7 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
                   <button
                     type="button"
                     aria-label="한자 크게"
-                    onClick={() => updateSlotFontSize('hanjaFontSize', hanjaSize + 4)}
+                    onClick={() => updateSlotFontSize('hanjaFontSize', hanjaSize + 8)}
                     className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
                   >
                     <Plus className="w-3 h-3" />
@@ -619,7 +619,7 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
                   <button
                     type="button"
                     aria-label="뜻과 음 작게"
-                    onClick={() => updateSlotFontSize('meaningFontSize', meaningSize - 2)}
+                    onClick={() => updateSlotFontSize('meaningFontSize', meaningSize - 4)}
                     className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
                   >
                     <Minus className="w-3 h-3" />
@@ -636,7 +636,7 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
                   <button
                     type="button"
                     aria-label="뜻과 음 크게"
-                    onClick={() => updateSlotFontSize('meaningFontSize', meaningSize + 2)}
+                    onClick={() => updateSlotFontSize('meaningFontSize', meaningSize + 4)}
                     className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
                   >
                     <Plus className="w-3 h-3" />
@@ -725,11 +725,15 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
               </span>
             </div>
 
-            {/* 2열 × 5행 10개 한자·뜻·음 격자 (한 화면에 스크롤 없이 공간 활용 극대화) */}
+            {/* 2열 × 5행 10개 한자·뜻·음 격자 (기본 크기는 한 화면 맞춤, 확대 시 원하는 크기만큼 자유롭게 확장) */}
             <div
               ref={gridTenRef}
               style={{ gap: `${rowGapTen}px` }}
-              className="flex-1 min-h-[380px] lg:min-h-0 grid grid-cols-2 grid-rows-5 overflow-hidden"
+              className={
+                isExpandedTenGrid
+                  ? 'grid grid-cols-1 sm:grid-cols-2 auto-rows-auto'
+                  : 'flex-1 min-h-[380px] lg:min-h-0 grid grid-cols-2 grid-rows-5 overflow-hidden'
+              }
             >
               {tenHanjaCells.map((cell) => (
                 <button
@@ -741,24 +745,25 @@ export const SongStudentStage: React.FC<SongStudentStageProps> = ({
                       setCurrentSlotNum(cell.number);
                     }
                   }}
-                  className={`min-h-0 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-1 flex items-center justify-between gap-2 text-left overflow-hidden transition ${
-                    cell.isClickableSlot ? 'cursor-pointer hover:bg-slate-50' : 'cursor-default'
-                  }`}
+                  style={minCellHeightTen ? { minHeight: `${minCellHeightTen}px` } : undefined}
+                  className={`min-h-0 min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-2 flex items-center justify-between gap-3 text-left transition ${
+                    isExpandedTenGrid ? 'flex-wrap' : 'overflow-hidden'
+                  } ${cell.isClickableSlot ? 'cursor-pointer hover:bg-slate-50' : 'cursor-default'}`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0 shrink-0">
                     <span className="text-xs font-mono font-black text-slate-400 tabular-nums w-5 shrink-0">
                       {cell.number}
                     </span>
                     <span
-                      style={{ fontSize: `${fitHanjaTen}px`, lineHeight: 1 }}
-                      className="font-black text-slate-950 select-none leading-none shrink-0"
+                      style={{ fontSize: `${fitHanjaTen}px`, lineHeight: 1.05 }}
+                      className="font-black text-slate-950 select-none shrink-0"
                     >
                       {cell.hanjaChar || '—'}
                     </span>
                   </div>
                   <span
                     style={{ fontSize: `${fitMeaningTen}px`, lineHeight: 1.2 }}
-                    className="font-bold text-slate-700 text-right break-keep truncate min-w-0"
+                    className="font-bold text-slate-700 text-right break-keep min-w-0"
                   >
                     {cell.hanjaMeaning || ''}
                   </span>

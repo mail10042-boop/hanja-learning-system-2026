@@ -141,13 +141,104 @@ async function startServer() {
     }
   });
 
-  // Upload or restore an audio file (supports both JSON base64 and raw binary body)
+  // Helper to assemble chunks into permanent audio file
+  const assembleAudioChunks = (
+    rawUploadId: unknown,
+    totalChunks: unknown,
+    fileName: unknown,
+    rawMimeType: unknown,
+    rawAudioId?: unknown
+  ) => {
+    const uploadId = sanitizeAudioId(String(rawUploadId || ''));
+    const count = Number(totalChunks);
+
+    if (!uploadId || !Number.isInteger(count) || count <= 0) {
+      return { status: 400, payload: { success: false, error: 'Invalid upload completion parameters' } };
+    }
+
+    const decodedFileName =
+      typeof fileName === 'string' && fileName.trim() ? fileName.trim() : 'audio.mp3';
+    const requestedId = typeof rawAudioId === 'string' ? sanitizeAudioId(rawAudioId) : '';
+    const audioId =
+      requestedId || `aud_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+    if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR, { recursive: true });
+    const tmpBinPath = path.join(AUDIO_DIR, `${audioId}.bin.tmp`);
+    const binPath = path.join(AUDIO_DIR, `${audioId}.bin`);
+    const metaPath = path.join(AUDIO_DIR, `${audioId}.meta.json`);
+
+    if (fs.existsSync(tmpBinPath)) fs.unlinkSync(tmpBinPath);
+
+    let totalSize = 0;
+    const partPaths: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const partPath = path.join(AUDIO_TMP_DIR, `${uploadId}.part_${i}`);
+      if (!fs.existsSync(partPath)) {
+        if (fs.existsSync(tmpBinPath)) fs.unlinkSync(tmpBinPath);
+        return { status: 400, payload: { success: false, error: `Missing audio chunk ${i}` } };
+      }
+      partPaths.push(partPath);
+      const chunkBuf = fs.readFileSync(partPath);
+      totalSize += chunkBuf.length;
+      fs.appendFileSync(tmpBinPath, chunkBuf);
+    }
+
+    fs.renameSync(tmpBinPath, binPath);
+    partPaths.forEach((p) => {
+      try {
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch {}
+    });
+
+    const mimeType = resolveAudioMimeType(
+      decodedFileName,
+      typeof rawMimeType === 'string' ? rawMimeType : ''
+    );
+    const meta = {
+      audioId,
+      fileName: decodedFileName,
+      mimeType,
+      size: totalSize,
+      uploadedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+    return { status: 200, payload: { success: true, audioFile: meta } };
+  };
+
+  // Upload or restore an audio file (supports single-shot AND chunk/complete actions on /api/song-audio)
   app.post(
     '/api/song-audio',
     express.raw({ type: 'application/octet-stream', limit: '100mb' }),
     (req, res) => {
       try {
         if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR, { recursive: true });
+        if (!fs.existsSync(AUDIO_TMP_DIR)) fs.mkdirSync(AUDIO_TMP_DIR, { recursive: true });
+
+        // Handle chunked upload directly on /api/song-audio (action: 'chunk' | 'complete')
+        if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+          if (req.body.action === 'chunk' && typeof req.body.chunkBase64 === 'string') {
+            const buffer = Buffer.from(req.body.chunkBase64, 'base64');
+            const uploadId = sanitizeAudioId(String(req.body.uploadId || ''));
+            const chunkIndex = Number(req.body.chunkIndex);
+            if (!buffer.length || !uploadId || !Number.isInteger(chunkIndex) || chunkIndex < 0) {
+              return res.status(400).json({ success: false, error: 'Invalid chunk payload' });
+            }
+            const partPath = path.join(AUDIO_TMP_DIR, `${uploadId}.part_${chunkIndex}`);
+            fs.writeFileSync(partPath, buffer);
+            return res.json({ success: true, chunkIndex, size: buffer.length });
+          }
+
+          if (req.body.action === 'complete') {
+            const result = assembleAudioChunks(
+              req.body.uploadId,
+              req.body.totalChunks,
+              req.body.fileName,
+              req.body.mimeType,
+              req.body.audioId
+            );
+            return res.status(result.status).json(result.payload);
+          }
+        }
 
         let buffer: Buffer | null = null;
         let bodyFileName = '';
@@ -253,58 +344,9 @@ async function startServer() {
   // Chunked audio upload: assemble chunks into final permanent audio file
   app.post('/api/song-audio/complete', (req, res) => {
     try {
-      const { uploadId: rawUploadId, totalChunks, fileName, mimeType: rawMimeType, audioId: rawAudioId } =
-        req.body || {};
-      const uploadId = sanitizeAudioId(String(rawUploadId || ''));
-      const count = Number(totalChunks);
-
-      if (!uploadId || !Number.isInteger(count) || count <= 0) {
-        return res.status(400).json({ success: false, error: 'Invalid upload completion parameters' });
-      }
-
-      const decodedFileName = typeof fileName === 'string' && fileName.trim() ? fileName.trim() : 'audio.mp3';
-      const requestedId = typeof rawAudioId === 'string' ? sanitizeAudioId(rawAudioId) : '';
-      const audioId =
-        requestedId || `aud_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-
-      const tmpBinPath = path.join(AUDIO_DIR, `${audioId}.bin.tmp`);
-      const binPath = path.join(AUDIO_DIR, `${audioId}.bin`);
-      const metaPath = path.join(AUDIO_DIR, `${audioId}.meta.json`);
-
-      if (fs.existsSync(tmpBinPath)) fs.unlinkSync(tmpBinPath);
-
-      let totalSize = 0;
-      const partPaths: string[] = [];
-      for (let i = 0; i < count; i++) {
-        const partPath = path.join(AUDIO_TMP_DIR, `${uploadId}.part_${i}`);
-        if (!fs.existsSync(partPath)) {
-          if (fs.existsSync(tmpBinPath)) fs.unlinkSync(tmpBinPath);
-          return res.status(400).json({ success: false, error: `Missing audio chunk ${i}` });
-        }
-        partPaths.push(partPath);
-        const chunkBuf = fs.readFileSync(partPath);
-        totalSize += chunkBuf.length;
-        fs.appendFileSync(tmpBinPath, chunkBuf);
-      }
-
-      fs.renameSync(tmpBinPath, binPath);
-      partPaths.forEach((p) => {
-        try {
-          if (fs.existsSync(p)) fs.unlinkSync(p);
-        } catch {}
-      });
-
-      const mimeType = resolveAudioMimeType(decodedFileName, typeof rawMimeType === 'string' ? rawMimeType : '');
-      const meta = {
-        audioId,
-        fileName: decodedFileName,
-        mimeType,
-        size: totalSize,
-        uploadedAt: new Date().toISOString(),
-      };
-      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
-
-      return res.json({ success: true, audioFile: meta });
+      const { uploadId, totalChunks, fileName, mimeType, audioId } = req.body || {};
+      const result = assembleAudioChunks(uploadId, totalChunks, fileName, mimeType, audioId);
+      return res.status(result.status).json(result.payload);
     } catch (error) {
       console.error('Error completing chunked audio upload:', error);
       return res.status(500).json({ success: false, error: 'Failed to assemble uploaded audio file' });
