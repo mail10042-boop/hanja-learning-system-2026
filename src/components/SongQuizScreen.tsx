@@ -56,6 +56,7 @@ import {
 } from '../utils/backupZip';
 import { IntegrityReportModal, RestoreConfirmModal } from './BackupIntegrityModal';
 import { playBeep } from '../utils/audio';
+import { uploadSongAudioFile } from '../utils/songAudioUpload';
 
 interface SongQuizScreenProps {
   state: AppState;
@@ -161,6 +162,8 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
   // New Audio song title + upload state
   const [audioTitleInput, setAudioTitleInput] = useState<string>('');
   const [isUploadingAudio, setIsUploadingAudio] = useState<boolean>(false);
+  const [uploadProgressPct, setUploadProgressPct] = useState<number>(0);
+  const [isDraggingAudio, setIsDraggingAudio] = useState<boolean>(false);
 
   // Inline Song editing state
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
@@ -197,8 +200,13 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Update helper ensuring normalized arrays stay persisted cleanly
-  const updateCurrentLesson = (updater: (lesson: SongLessonData) => SongLessonData) => {
+  // Update helper targeting explicit (level, lessonName) so async uploads never miss the active lesson
+  const updateLessonByTarget = (
+    targetLevel: string,
+    targetLessonName: string,
+    updater: (lesson: SongLessonData) => SongLessonData
+  ) => {
+    const targetLessonId = makeSongLessonId(targetLevel, targetLessonName);
     const nowStr = new Date();
     const timeFormatted = `${String(nowStr.getHours()).padStart(2, '0')}:${String(
       nowStr.getMinutes()
@@ -206,7 +214,8 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
 
     onUpdateState((prev) => {
       const prevMap = prev.songLessons || {};
-      const rawExisting = prevMap[currentLessonId] || createEmptySongLesson(selectedLevel, selectedLessonName);
+      const rawExisting =
+        prevMap[targetLessonId] || createEmptySongLesson(targetLevel, targetLessonName);
       const normalizedBase: SongLessonData = {
         ...rawExisting,
         songs: getSongMediaList(rawExisting),
@@ -214,20 +223,25 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
       };
       const updated = {
         ...updater(normalizedBase),
-        id: currentLessonId,
-        level: selectedLevel,
-        lessonName: selectedLessonName,
+        id: targetLessonId,
+        level: targetLevel,
+        lessonName: targetLessonName,
         updatedAt: new Date().toISOString(),
       };
       return {
         ...prev,
         songLessons: {
           ...prevMap,
-          [currentLessonId]: updated,
+          [targetLessonId]: updated,
         },
       };
     });
     setLastSavedLabel(`자동 저장됨 (${timeFormatted})`);
+  };
+
+  // Update helper ensuring normalized arrays stay persisted cleanly
+  const updateCurrentLesson = (updater: (lesson: SongLessonData) => SongLessonData) => {
+    updateLessonByTarget(selectedLevel, selectedLessonName, updater);
   };
 
   // Explicit Cloud Save button
@@ -494,57 +508,82 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
     showToast(`유튜브 노래 [${title}]이 추가되었습니다.`);
   };
 
-  const handleUploadNewAudioSong = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
+  const processAudioFilesUpload = async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList || []).filter((f) => f && f.size > 0);
+    if (files.length === 0) {
+      showToast('업로드할 수 있는 유효한 음원 파일을 선택해 주세요.', 'error');
+      return;
+    }
 
+    const targetLevel = selectedLevel;
+    const targetLessonName = selectedLessonName;
+    if (!targetLevel || !targetLessonName) {
+      showToast('먼저 급수와 과를 선택해 주세요.', 'error');
+      return;
+    }
+
+    const customTitle = audioTitleInput.trim();
     setIsUploadingAudio(true);
+    setUploadProgressPct(0);
+
+    let lastCreatedId: string | null = null;
+    let uploadedCount = 0;
+
     try {
-      const res = await fetch(
-        `/api/song-audio?fileName=${encodeURIComponent(file.name)}&mimeType=${encodeURIComponent(
-          file.type || 'audio/mpeg'
-        )}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-          body: file,
-        }
-      );
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.audioFile) {
-        throw new Error(data.error || '업로드 실패');
+      for (let idx = 0; idx < files.length; idx++) {
+        const file = files[idx];
+        const meta: SongAudioFileMeta = await uploadSongAudioFile(file, (pct) => {
+          const overall = Math.round(((idx + pct / 100) / files.length) * 100);
+          setUploadProgressPct(overall);
+        });
+
+        const baseName = file.name.replace(/\.[^.]+$/, '') || `${targetLessonName} 음원`;
+        const title =
+          files.length === 1 && customTitle ? customTitle : customTitle ? `${customTitle} (${idx + 1})` : baseName;
+
+        const newSong: SongMediaItem = {
+          id: `song_aud_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+          type: 'audio',
+          title,
+          youtubeUrl: '',
+          audioFile: meta,
+          startTime: 0,
+          endTime: null,
+          createdAt: new Date().toISOString(),
+        };
+
+        updateLessonByTarget(targetLevel, targetLessonName, (lesson) => ({
+          ...lesson,
+          songs: [...(lesson.songs || []), newSong],
+        }));
+
+        lastCreatedId = newSong.id;
+        uploadedCount++;
       }
 
-      const meta: SongAudioFileMeta = data.audioFile;
-      const title =
-        audioTitleInput.trim() || file.name.replace(/\.[^.]+$/, '') || `${selectedLessonName} 음원`;
-      const newSong: SongMediaItem = {
-        id: `song_aud_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        type: 'audio',
-        title,
-        youtubeUrl: '',
-        audioFile: meta,
-        startTime: 0,
-        endTime: null,
-        createdAt: new Date().toISOString(),
-      };
-
-      updateCurrentLesson((lesson) => ({
-        ...lesson,
-        songs: [...(lesson.songs || []), newSong],
-      }));
-
-      setPreviewSongId(newSong.id);
+      if (lastCreatedId) setPreviewSongId(lastCreatedId);
       setAudioTitleInput('');
       playBeep(state.soundEnabled, 780, 0.06);
-      showToast(`음원 [${title}] (${file.name})이 서버에 영구 저장되었습니다.`);
+      showToast(
+        uploadedCount === 1
+          ? `[${targetLevel} ${targetLessonName}] 음원 (${files[0].name})이 서버에 영구 저장되었습니다.`
+          : `[${targetLevel} ${targetLessonName}] 음원 ${uploadedCount}개가 서버에 영구 저장되었습니다.`
+      );
     } catch (err) {
       console.error('Audio upload failed:', err);
-      showToast('음원 파일 업로드에 실패했습니다.', 'error');
+      const reason = err instanceof Error && err.message ? err.message : '알 수 없는 오류';
+      showToast(`음원 파일 업로드 실패: ${reason}`, 'error');
     } finally {
       setIsUploadingAudio(false);
+      setUploadProgressPct(0);
     }
+  };
+
+  const handleUploadNewAudioSong = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles: File[] = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    if (selectedFiles.length === 0) return;
+    await processAudioFilesUpload(selectedFiles);
   };
 
   const handleReplaceSongAudioFile = async (
@@ -555,28 +594,19 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
     e.target.value = '';
     if (!file) return;
 
+    const targetLevel = selectedLevel;
+    const targetLessonName = selectedLessonName;
     const targetSong = songsList.find((s) => s.id === songId);
     const oldAudioId = targetSong?.audioFile?.audioId;
 
     setIsUploadingAudio(true);
+    setUploadProgressPct(0);
     try {
-      const res = await fetch(
-        `/api/song-audio?fileName=${encodeURIComponent(file.name)}&mimeType=${encodeURIComponent(
-          file.type || 'audio/mpeg'
-        )}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-          body: file,
-        }
-      );
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.audioFile) {
-        throw new Error(data.error || '업로드 실패');
-      }
-      const meta: SongAudioFileMeta = data.audioFile;
+      const meta: SongAudioFileMeta = await uploadSongAudioFile(file, (pct) => {
+        setUploadProgressPct(pct);
+      });
 
-      updateCurrentLesson((lesson) => ({
+      updateLessonByTarget(targetLevel, targetLessonName, (lesson) => ({
         ...lesson,
         songs: (lesson.songs || []).map((s) =>
           s.id === songId ? { ...s, audioFile: meta } : s
@@ -589,10 +619,12 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
         );
       }
       showToast(`음원 파일이 [${file.name}]으로 교체되었습니다.`);
-    } catch {
-      showToast('음원 교체 중 오류가 발생했습니다.', 'error');
+    } catch (err) {
+      const reason = err instanceof Error && err.message ? err.message : '알 수 없는 오류';
+      showToast(`음원 교체 실패: ${reason}`, 'error');
     } finally {
       setIsUploadingAudio(false);
+      setUploadProgressPct(0);
     }
   };
 
@@ -1367,11 +1399,29 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
                 </div>
               </div>
 
-              {/* 3-2. Direct Audio File Upload (MP3, WAV, M4A) */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+              {/* 3-2. Direct Audio File Upload (All Audio Formats + Chunked Large File + Drag&Drop) */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingAudio(true);
+                }}
+                onDragLeave={() => setIsDraggingAudio(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingAudio(false);
+                  if (!isUploadingAudio && e.dataTransfer?.files?.length) {
+                    processAudioFilesUpload(e.dataTransfer.files);
+                  }
+                }}
+                className={`border rounded-xl p-4 space-y-3 transition ${
+                  isDraggingAudio
+                    ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-300'
+                    : 'bg-slate-50 border-slate-200'
+                }`}
+              >
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
                   <Music className="w-4 h-4 text-emerald-600" />
-                  <span>노래 파일 직접 업로드 (MP3, WAV, M4A)</span>
+                  <span>노래 파일 직접 업로드 (모든 음원 파일 지원)</span>
                 </div>
                 <div className="space-y-2">
                   <input
@@ -1381,23 +1431,31 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
                     placeholder="노래 제목 입력 (비워두면 파일명 사용)"
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                   />
-                  <label className="w-full py-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition">
-                    <Upload className="w-4 h-4" />
+                  <label className="w-full py-3 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition text-center">
+                    <Upload className="w-4 h-4 shrink-0" />
                     <span>
                       {isUploadingAudio
-                        ? '음원 서버 저장 중...'
-                        : '음원 파일 선택하여 등록 (MP3 · WAV · M4A)'}
+                        ? `음원 서버 저장 중... (${uploadProgressPct}%)`
+                        : '음원 파일 선택 또는 끌어다 놓기 (MP3 · WAV · M4A · FLAC · AAC 등 모든 음원)'}
                     </span>
                     <input
                       type="file"
-                      accept=".mp3,.wav,.m4a,.ogg,.aac,audio/*"
+                      multiple
                       onChange={handleUploadNewAudioSong}
                       disabled={isUploadingAudio}
                       className="hidden"
                     />
                   </label>
+                  {isUploadingAudio && (
+                    <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div
+                        style={{ width: `${uploadProgressPct}%` }}
+                        className="h-full bg-emerald-600 transition-all duration-150"
+                      />
+                    </div>
+                  )}
                   <p className="text-[11px] text-slate-500">
-                    업로드된 음원 파일은 서버에 영구 저장되며, 전체 ZIP 백업 시 원본 파일이 함께 포함됩니다.
+                    모든 형식·대용량 음원 파일이 분할 전송으로 안전하게 저장되며, 전체 ZIP 백업 시 원본이 함께 포함됩니다.
                   </p>
                 </div>
               </div>
@@ -1520,8 +1578,8 @@ export const SongQuizScreen: React.FC<SongQuizScreenProps> = ({
                                     교체
                                     <input
                                       type="file"
-                                      accept=".mp3,.wav,.m4a,.ogg,.aac,audio/*"
                                       onChange={(ev) => handleReplaceSongAudioFile(song.id, ev)}
+                                      disabled={isUploadingAudio}
                                       className="hidden"
                                     />
                                   </label>
